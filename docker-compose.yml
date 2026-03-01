@@ -14,25 +14,37 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    container_name: vanta-billing-db
 
   app:
-    build: .
+    build:
+      context: .
+      target: dev
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/vanta_billing
+    volumes:
+      - .:/src
     depends_on:
       db:
         condition: service_healthy
+    container_name: vanta-billing-app
 
   test:
-    build: .
+    build:
+      context: .
+      target: dev
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/vanta_billing
     depends_on:
       db:
         condition: service_healthy
-    command: sh -c "pip install pytest httpx pytest-cov && pytest -v"
+    command: pytest -v
     profiles:
       - test
 
