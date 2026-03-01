@@ -15,7 +15,6 @@ from sqlalchemy.orm import relationship
 from app.database import Base
 from app.services.sunat_catalogs import DocumentStatus
 
-
 class Document(Base):
     __tablename__ = "documents"
 
