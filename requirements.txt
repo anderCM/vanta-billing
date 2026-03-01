@@ -4,3 +4,9 @@ sqlalchemy==2.0.36
 psycopg2-binary==2.9.10
 pydantic-settings==2.7.1
 alembic==1.14.1
+cryptography==44.0.0
+lxml==5.3.0
+signxml==4.0.2
+httpx==0.28.1
+python-multipart==0.0.20
+qrcode[pil]==8.0
