@@ -59,7 +59,7 @@ def _build_get_status_envelope(
         ruc=ruc,
         doc_type=doc_type,
         series=series,
-        correlative=correlative,
+        correlative=f"{correlative:08d}",
     )
 
 
