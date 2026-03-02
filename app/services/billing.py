@@ -267,10 +267,10 @@ async def create_and_send_document(
 
 
 async def retry_send_document(db: Session, client: Client, document: Document) -> Document:
-    """Retry sending a document in SIGNED or ERROR status."""
+    """Retry sending a document in SIGNED, ERROR or REJECTED status."""
     _validate_client_credentials(client)
 
-    retryable = {DocumentStatus.SIGNED, DocumentStatus.ERROR}
+    retryable = {DocumentStatus.SIGNED, DocumentStatus.ERROR, DocumentStatus.REJECTED}
     if document.status not in retryable:
         raise BillingError(f"Cannot retry document in status '{document.status}'")
     if not document.xml_signed:
@@ -308,7 +308,11 @@ async def retry_send_document(db: Session, client: Client, document: Document) -
 
 
 async def check_document_status(db: Session, client: Client, document: Document) -> Document:
-    """Query SUNAT for the current status of a document."""
+    """Query SUNAT for the current status of a document.
+
+    If SUNAT_CONSULT_URL is not configured (beta environment), returns
+    the document with its current locally stored status without querying SUNAT.
+    """
     _validate_client_credentials(client)
 
     sol_user = decrypt_string(client.sol_user)
@@ -324,6 +328,13 @@ async def check_document_status(db: Session, client: Client, document: Document)
         sol_user=sol_user,
         sol_password=sol_password,
     )
+
+    if cdr is None:
+        logger.info(
+            "No SUNAT consult service configured, returning local status for document %s: status=%s",
+            document.id, document.status,
+        )
+        return document
 
     document.cdr_content = cdr.get("cdr_content") or document.cdr_content
     document.cdr_code = cdr.get("cdr_code") or document.cdr_code

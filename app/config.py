@@ -8,8 +8,10 @@ class Settings(BaseSettings):
 
     ENCRYPTION_KEY: str = ""
     SUNAT_SOAP_URL: str = ""
+    SUNAT_CONSULT_URL: str = ""
     SUNAT_VERIFY_SSL: bool = True
     IGV_RATE: float = 0.18
+    ENABLE_DOCS: bool = False
     model_config = {"env_file": ".env"}
 
 
