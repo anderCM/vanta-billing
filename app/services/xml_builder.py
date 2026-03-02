@@ -91,7 +91,7 @@ def build_invoice_xml(
     _el(root, CBC, "CustomizationID", "2.0")
 
     # Document ID
-    doc_id = f"{series}-{correlative}"
+    doc_id = f"{series}-{correlative:08d}"
     _el(root, CBC, "ID", doc_id)
     _el(root, CBC, "IssueDate", issue_date)
     _el(

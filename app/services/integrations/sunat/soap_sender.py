@@ -85,7 +85,7 @@ async def send_document(
 
     Returns a dict with cdr_content, cdr_code, cdr_description, cdr_notes, status.
     """
-    filename = f"{ruc}-{document_type}-{series}-{correlative}"
+    filename = f"{ruc}-{document_type}-{series}-{correlative:08d}"
     archive, _hash = _zip_and_encode(xml_signed, filename)
 
     username = f"{ruc}{sol_user}"
