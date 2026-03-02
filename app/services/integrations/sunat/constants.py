@@ -31,7 +31,7 @@ SEND_BILL_TEMPLATE = """\
   </soapenv:Body>
 </soapenv:Envelope>"""
 
-GET_STATUS_TEMPLATE = """\
+GET_STATUS_CDR_TEMPLATE = """\
 <soapenv:Envelope xmlns:soapenv="{ns_soap}"
                   xmlns:ser="{ns_ser}"
                   xmlns:wsse="{ns_wsse}">
@@ -52,6 +52,11 @@ GET_STATUS_TEMPLATE = """\
     </ser:getStatusCdr>
   </soapenv:Body>
 </soapenv:Envelope>"""
+
+# --- SOAP endpoints ---
+
+ENDPOINT_BILL_SERVICE = "/billService"
+ENDPOINT_CONSULT_SERVICE = "/billConsultService"
 
 # --- SOAP action headers ---
 
