@@ -59,7 +59,7 @@ async def query_document_status(
     Returns a dict with cdr_content, cdr_code, cdr_description, cdr_notes, status.
     """
     username = f"{ruc}{sol_user}"
-    doc_id = f"{ruc}-{document_type}-{series}-{correlative}"
+    doc_id = f"{ruc}-{document_type}-{series}-{correlative:08d}"
 
     logger.info("Querying SUNAT status for %s via SOAP", doc_id)
 
