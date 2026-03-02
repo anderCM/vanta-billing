@@ -1,7 +1,13 @@
-"""getStatusCdr operation: query document status from SUNAT."""
+"""getStatusCdr operation: query document status from SUNAT.
+
+Uses the billConsultService which is only available in production.
+When SUNAT_CONSULT_URL is not configured (e.g. beta), returns None
+so the caller can fall back to the locally stored status.
+"""
 
 import logging
 
+from app.config import settings
 from app.exceptions import CDRParseError
 from app.services.sunat_catalogs import DocumentStatus
 
@@ -53,11 +59,16 @@ async def query_document_status(
     correlative: int,
     sol_user: str,
     sol_password: str,
-) -> dict:
+) -> dict | None:
     """Query SUNAT for the status of a previously sent document.
 
     Returns a dict with cdr_content, cdr_code, cdr_description, cdr_notes, status.
+    Returns None if SUNAT_CONSULT_URL is not configured (beta environment).
     """
+    if not settings.SUNAT_CONSULT_URL:
+        logger.info("SUNAT_CONSULT_URL not configured, skipping status query")
+        return None
+
     username = f"{ruc}{sol_user}"
     doc_id = f"{ruc}-{document_type}-{series}-{correlative:08d}"
 

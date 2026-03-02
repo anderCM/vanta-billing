@@ -13,10 +13,12 @@ from app.config import settings
 from app.exceptions import SUNATError
 
 from .constants import (
+    ENDPOINT_BILL_SERVICE,
+    ENDPOINT_CONSULT_SERVICE,
     NS_SERVICE,
     NS_SOAPENV,
     NS_WSSE,
-    GET_STATUS_TEMPLATE,
+    GET_STATUS_CDR_TEMPLATE,
     SEND_BILL_TEMPLATE,
     SOAP_ACTION_GET_STATUS_CDR,
     SOAP_ACTION_SEND_BILL,
@@ -41,7 +43,7 @@ def _build_send_bill_envelope(
     )
 
 
-def _build_get_status_envelope(
+def _build_get_status_cdr_envelope(
     *,
     username: str,
     password: str,
@@ -50,7 +52,7 @@ def _build_get_status_envelope(
     series: str,
     correlative: int,
 ) -> str:
-    return GET_STATUS_TEMPLATE.format(
+    return GET_STATUS_CDR_TEMPLATE.format(
         ns_soap=NS_SOAPENV,
         ns_ser=NS_SERVICE,
         ns_wsse=NS_WSSE,
@@ -59,7 +61,7 @@ def _build_get_status_envelope(
         ruc=ruc,
         doc_type=doc_type,
         series=series,
-        correlative=f"{correlative:08d}",
+        correlative=correlative,
     )
 
 
@@ -107,8 +109,9 @@ async def call_send_bill(
     async with httpx.AsyncClient(
         timeout=60, verify=settings.SUNAT_VERIFY_SSL
     ) as client:
+        url = f"{settings.SUNAT_SOAP_URL}{ENDPOINT_BILL_SERVICE}"
         response = await client.post(
-            settings.SUNAT_SOAP_URL, content=envelope.encode("utf-8"), headers=headers
+            url, content=envelope.encode("utf-8"), headers=headers
         )
 
     if response.status_code not in (200, 500):
@@ -133,8 +136,12 @@ async def call_get_status_cdr(
     series: str,
     correlative: int,
 ) -> etree._Element:
-    """Send a SOAP getStatusCdr request and return the parsed Body element."""
-    envelope = _build_get_status_envelope(
+    """Send a SOAP getStatusCdr request and return the parsed Body element.
+
+    Uses SUNAT_CONSULT_URL (billConsultService), which is only available
+    in production. The caller must check that the URL is configured.
+    """
+    envelope = _build_get_status_cdr_envelope(
         username=username,
         password=password,
         ruc=ruc,
@@ -148,11 +155,11 @@ async def call_get_status_cdr(
     async with httpx.AsyncClient(
         timeout=30, verify=settings.SUNAT_VERIFY_SSL
     ) as client:
+        url = f"{settings.SUNAT_CONSULT_URL}{ENDPOINT_CONSULT_SERVICE}"
         response = await client.post(
-            settings.SUNAT_SOAP_URL, content=envelope.encode("utf-8"), headers=headers
+            url, content=envelope.encode("utf-8"), headers=headers
         )
 
-    # SUNAT returns SOAP faults with HTTP 500 — parse XML in both cases
     if response.status_code not in (200, 500):
         logger.error(
             "SUNAT SOAP getStatusCdr HTTP error: %d - %s",
