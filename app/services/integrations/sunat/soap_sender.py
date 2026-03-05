@@ -80,8 +80,13 @@ async def send_document(
     correlative: int,
     sol_user: str,
     sol_password: str,
+    base_url: str | None = None,
 ) -> dict:
     """Send a signed document to SUNAT via SOAP sendBill.
+
+    Args:
+        base_url: Override the default SUNAT_SOAP_URL (used for dispatch guides
+                  which go to a different SUNAT host).
 
     Returns a dict with cdr_content, cdr_code, cdr_description, cdr_notes, status.
     """
@@ -97,6 +102,7 @@ async def send_document(
         password=sol_password,
         filename=f"{filename}.zip",
         content_base64=archive,
+        base_url=base_url,
     )
 
     result = _extract_cdr_from_response(body)

@@ -32,6 +32,8 @@ class ClientRead(BaseModel):
     has_certificate: bool
     serie_factura: str | None
     serie_boleta: str | None
+    serie_grr: str | None
+    serie_grt: str | None
     send_email: bool
     generate_pdf: bool
     is_active: bool
@@ -56,6 +58,8 @@ class ClientRead(BaseModel):
                 "has_certificate": bool(data.certificate),
                 "serie_factura": data.serie_factura,
                 "serie_boleta": data.serie_boleta,
+                "serie_grr": data.serie_grr,
+                "serie_grt": data.serie_grt,
                 "send_email": data.send_email,
                 "generate_pdf": data.generate_pdf,
                 "is_active": data.is_active,
@@ -74,5 +78,7 @@ class ClientUpdate(BaseModel):
     sol_password: str | None = None
     serie_factura: str | None = Field(None, max_length=4)
     serie_boleta: str | None = Field(None, max_length=4)
+    serie_grr: str | None = Field(None, max_length=4)
+    serie_grt: str | None = Field(None, max_length=4)
     send_email: bool | None = None
     generate_pdf: bool | None = None

@@ -15,7 +15,8 @@ from app.exceptions import (
     XMLBuildError,
     XMLSignError,
 )
-from app.routers import clients, documents
+from app.middleware.ip_whitelist import IPWhitelistMiddleware
+from app.routers import clients, dispatch_guides, documents
 
 logging.basicConfig(
     level=logging.DEBUG if settings.DEBUG else logging.INFO,
@@ -42,10 +43,14 @@ app = FastAPI(
     openapi_url="/openapi.json" if settings.ENABLE_DOCS else None,
 )
 
+# Middleware
+app.add_middleware(IPWhitelistMiddleware)
+
 # Routers
 API_PREFIX = "/api/v1"
 app.include_router(clients.router, prefix=API_PREFIX)
 app.include_router(documents.router, prefix=API_PREFIX)
+app.include_router(dispatch_guides.router, prefix=API_PREFIX)
 
 
 # Exception handlers
