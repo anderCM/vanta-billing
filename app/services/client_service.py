@@ -23,6 +23,8 @@ _UPDATABLE_FIELDS = {
     "sol_password",
     "serie_factura",
     "serie_boleta",
+    "serie_grr",
+    "serie_grt",
     "send_email",
     "generate_pdf",
 }

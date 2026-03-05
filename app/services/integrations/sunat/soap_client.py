@@ -94,9 +94,15 @@ def _parse_soap_response(response_bytes: bytes) -> etree._Element:
 
 
 async def call_send_bill(
-    *, username: str, password: str, filename: str, content_base64: str
+    *, username: str, password: str, filename: str, content_base64: str,
+    base_url: str | None = None,
 ) -> etree._Element:
-    """Send a SOAP sendBill request and return the parsed Body element."""
+    """Send a SOAP sendBill request and return the parsed Body element.
+
+    Args:
+        base_url: Override the default SUNAT_SOAP_URL (used for dispatch guides
+                  which go to a different SUNAT host).
+    """
     envelope = _build_send_bill_envelope(
         username=username,
         password=password,
@@ -109,7 +115,7 @@ async def call_send_bill(
     async with httpx.AsyncClient(
         timeout=60, verify=settings.SUNAT_VERIFY_SSL
     ) as client:
-        url = f"{settings.SUNAT_SOAP_URL}{ENDPOINT_BILL_SERVICE}"
+        url = f"{base_url or settings.SUNAT_SOAP_URL}{ENDPOINT_BILL_SERVICE}"
         response = await client.post(
             url, content=envelope.encode("utf-8"), headers=headers
         )

@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import text
@@ -19,6 +18,8 @@ from app.services.sunat_catalogs import (
     TAX_TYPE_TO_IGV_CODE,
     DocumentStatus,
     IGVGroup,
+    peru_issue_date,
+    peru_now,
 )
 from app.services.qr_generator import build_qr_text, extract_signature_values, generate_qr_image
 from app.services.xml_builder import build_invoice_xml
@@ -135,7 +136,7 @@ async def create_and_send_document(
     calculated_items, total_gravada, total_igv, total_amount = _calculate_items(items_data)
 
     correlative = _next_correlative(db, client.id, document_type, data.series)
-    issue_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    issue_date = peru_issue_date()
 
     document = Document(
         client_id=client.id,
@@ -146,7 +147,7 @@ async def create_and_send_document(
         customer_doc_number=data.customer_doc_number,
         customer_name=data.customer_name,
         customer_address=data.customer_address,
-        issue_date=datetime.now(timezone.utc),
+        issue_date=peru_now(),
         currency=data.currency,
         total_gravada=total_gravada,
         total_igv=total_igv,

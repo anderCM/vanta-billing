@@ -1,5 +1,9 @@
 from app.database import Base  # noqa: F401
+from app.models.allowed_ip import AllowedIP  # noqa: F401
 from app.models.client import Client  # noqa: F401
+from app.models.integrator import Integrator  # noqa: F401
+from app.models.dispatch_guide import DispatchGuide  # noqa: F401
+from app.models.dispatch_guide_item import DispatchGuideItem  # noqa: F401
 from app.models.document import Document  # noqa: F401
 from app.models.document_item import DocumentItem  # noqa: F401
 from app.models.document_series import DocumentSeries  # noqa: F401

@@ -61,6 +61,35 @@ def build_qr_text(
     ])
 
 
+def build_dispatch_guide_qr_text(
+    *,
+    ruc: str,
+    document_type: str,
+    series: str,
+    correlative: int,
+    issue_date: str,
+    recipient_doc_type: str,
+    recipient_doc_number: str,
+    digest_value: str,
+    signature_value: str,
+) -> str:
+    """Build QR text for Guías de Remisión per SUNAT specification.
+
+    Format: RUC|TIPO_DOC|SERIE|CORRELATIVO|FECHA|TIPO_DOC_DESTINATARIO|NRO_DOC_DESTINATARIO|DIGEST|SIGNATURE
+    """
+    return "|".join([
+        ruc,
+        document_type,
+        series,
+        str(correlative),
+        issue_date,
+        recipient_doc_type,
+        recipient_doc_number,
+        digest_value,
+        signature_value,
+    ])
+
+
 def generate_qr_image(qr_text: str) -> str:
     """Generate a QR code PNG image and return it as a base64 data URI."""
     qr = qrcode.QRCode(
