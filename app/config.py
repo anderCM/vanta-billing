@@ -10,6 +10,13 @@ class Settings(BaseSettings):
     SUNAT_SOAP_URL: str = ""
     SUNAT_CONSULT_URL: str = ""
     SUNAT_VERIFY_SSL: bool = True
+
+    # REST API for GRE (Guías de Remisión Electrónica)
+    SUNAT_REST_CLIENT_ID: str = ""
+    SUNAT_REST_KEY: str = ""
+    SUNAT_REST_TOKEN_URL: str = ""
+    SUNAT_REST_API_URL: str = ""
+
     IGV_RATE: float = 0.18
     ENABLE_DOCS: bool = False
     model_config = {"env_file": ".env"}

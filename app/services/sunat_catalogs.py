@@ -3,7 +3,22 @@
 Translates user-friendly values to SUNAT catalog codes.
 """
 
+from datetime import datetime, timedelta, timezone
 from enum import Enum
+
+# --- Peru timezone (UTC-5) ---
+
+PERU_TZ = timezone(timedelta(hours=-5))
+
+
+def peru_now() -> datetime:
+    """Return the current datetime in Peru timezone."""
+    return datetime.now(PERU_TZ)
+
+
+def peru_issue_date() -> str:
+    """Return today's date in Peru timezone as YYYY-MM-DD string."""
+    return peru_now().strftime("%Y-%m-%d")
 
 
 # --- Document status lifecycle ---
@@ -45,4 +60,34 @@ TAX_TYPE_TO_IGV_CODE = {
 CUSTOMER_DOC_TYPE_TO_CODE = {
     "ruc": "6",
     "dni": "1",
+}
+
+# --- Catálogo 18 - Transport modality ---
+
+TRANSPORT_MODALITY_CODES = {
+    "public": "01",    # Transporte público
+    "private": "02",   # Transporte privado
+}
+
+# --- Catálogo 20 - Transfer reason codes ---
+
+TRANSFER_REASON_CODES = {
+    "venta": "01",
+    "compra": "02",
+    "traslado_entre_establecimientos": "04",
+    "importacion": "08",
+    "exportacion": "09",
+    "otros": "13",
+}
+
+# --- Guía de Remisión document types ---
+
+GR_DOCUMENT_TYPES = {
+    "grr": "09",  # Guía de Remisión Remitente
+    "grt": "31",  # Guía de Remisión Transportista
+}
+
+GR_SERIES_PREFIXES = {
+    "09": "T",
+    "31": "V",
 }

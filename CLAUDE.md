@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Vanta Billing is a Peruvian electronic invoicing (facturación electrónica) API built with FastAPI. It manages clients, generates UBL 2.1 XML documents (invoices/boletas), signs them with digital certificates, and submits them to SUNAT (Peru's tax authority) via SOAP.
+Vanta Billing is a Peruvian electronic invoicing (facturación electrónica) **microservice** built with FastAPI. It manages clients, generates UBL 2.1 XML documents (invoices, boletas, and dispatch guides), signs them with digital certificates, and submits them to SUNAT (Peru's tax authority) via SOAP.
+
+This is a **standalone microservice** designed to be consumed by other applications (monoliths, frontends, other services) via its REST API.
 
 ## Common Commands
 
@@ -40,17 +42,23 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ### Key Layers
 
-- **`app/routers/`** — FastAPI route handlers. `clients.py` (registration, profile, certificate upload, key rotation) and `documents.py` (invoice/receipt creation, listing, retry, status check).
-- **`app/services/billing.py`** — Core billing orchestration: translates user input → SUNAT catalog codes, calculates IGV (tax), persists document, builds XML, signs it, generates QR, sends to SUNAT. This is the main business logic file.
-- **`app/services/xml_builder.py`** — Builds UBL 2.1 XML using `lxml`.
-- **`app/services/xml_signer.py`** — Signs XML with client's `.pfx`/`.p12` certificate via `signxml`.
-- **`app/services/integrations/sunat.py`** — SOAP client for SUNAT submission and status queries using `httpx`.
+- **`app/routers/`** — FastAPI route handlers:
+  - `clients.py` — Registration, profile, certificate upload, key rotation.
+  - `documents.py` — Invoice/receipt creation, listing, retry, status check.
+  - `dispatch_guides.py` — Guías de Remisión (GRR remitente + GRT transportista).
+- **`app/services/billing.py`** — Invoice/receipt orchestration: translates user input → SUNAT catalog codes, calculates IGV (tax), persists document, builds XML, signs it, generates QR, sends to SUNAT.
+- **`app/services/gr_billing.py`** — Dispatch guide orchestration: persist → build DespatchAdvice XML → sign → generate QR → send to SUNAT (no tax calculation).
+- **`app/services/xml_builder.py`** — Builds UBL 2.1 Invoice XML using `lxml`.
+- **`app/services/xml_builder_gr.py`** — Builds UBL 2.1 DespatchAdvice XML for dispatch guides.
+- **`app/services/xml_signer.py`** — Signs XML with client's `.pfx`/`.p12` certificate via `signxml`. Shared by invoices and dispatch guides.
+- **`app/services/qr_generator.py`** — QR code generation. `build_qr_text` for invoices (includes IGV/totals), `build_dispatch_guide_qr_text` for GRs (no monetary fields). Shared `generate_qr_image` returns base64 PNG.
+- **`app/services/integrations/sunat/`** — SOAP client for SUNAT submission and status queries using `httpx`. Supports `base_url` override for dispatch guides (different SUNAT host).
 - **`app/services/crypto.py`** — Fernet encryption/decryption for sensitive fields, API key hashing.
-- **`app/services/sunat_catalogs.py`** — SUNAT catalog code mappings (document types, tax types, unit codes).
-- **`app/models/`** — SQLAlchemy models: `Client`, `Document`, `DocumentItem`, `DocumentSeries`.
+- **`app/services/sunat_catalogs.py`** — SUNAT catalog code mappings (document types, tax types, unit codes, transport modalities, transfer reasons).
+- **`app/models/`** — SQLAlchemy models: `Client`, `Document`, `DocumentItem`, `DocumentSeries`, `DispatchGuide`, `DispatchGuideItem`.
 - **`app/schemas/`** — Pydantic schemas for request/response validation.
 
-### Document Flow
+### Invoice/Receipt Flow
 
 1. Client sends invoice/receipt data to `POST /api/v1/invoices` or `/receipts`
 2. `billing.py` translates item types to SUNAT codes, calculates tax amounts
@@ -59,13 +67,104 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 5. Signed XML is sent to SUNAT via SOAP; CDR response is stored
 6. Failed documents can be retried via `POST /documents/{id}/retry`
 
+### Dispatch Guide Flow (Guías de Remisión)
+
+1. Client sends transport data to `POST /api/v1/dispatch-guides/remitente` (GRR, type "09", series T) or `/transportista` (GRT, type "31", series V)
+2. `gr_billing.py` translates enums to SUNAT catalog codes (no tax calculation needed)
+3. DispatchGuide + items persisted to DB with auto-incrementing correlative
+4. DespatchAdvice-2 UBL XML is built, signed with client's certificate, QR code generated
+5. Signed XML sent to SUNAT via SOAP (uses `SUNAT_GRE_URL`, separate from invoice endpoint); CDR response stored
+6. Failed guides can be retried via `POST /dispatch-guides/{id}/retry`
+
+**GRR (Remitente):** Requires transport modality — `public` needs carrier RUC/name, `private` needs vehicle plate + driver info.
+**GRT (Transportista):** Always requires vehicle plate, driver info, and shipper (remitente) info.
+
 ### Exception Hierarchy
 
 All custom exceptions inherit from `BillingError`. Specific subtypes (`SUNATError`, `XMLBuildError`, `XMLSignError`, `MissingCredentialsError`, `CDRParseError`) are mapped to HTTP status codes in `main.py` exception handlers.
 
+## Integration Guide (for consuming services)
+
+This microservice exposes a REST API under `http://<host>:8000/api/v1`. All business endpoints require a Bearer token (the client's API key).
+
+### Setup Flow
+
+1. **Register a client:** `POST /api/v1/clients` with `{ ruc, razon_social, ... }` → returns `api_key` (save it, shown only once)
+2. **Upload certificate:** `POST /api/v1/clients/me/certificate` with `.pfx` file + password
+3. **Configure SOL credentials:** `PUT /api/v1/clients/me` with `{ sol_user, sol_password }`
+4. **Optionally set default series:** `PUT /api/v1/clients/me` with `{ serie_factura, serie_boleta, serie_grr, serie_grt }`
+
+### Issuing Documents
+
+All `POST` endpoints are async — they create, sign, and send to SUNAT in a single call, returning the full result including CDR response.
+
+```
+# Invoices (Facturas)
+POST /api/v1/invoices
+Authorization: Bearer <api_key>
+{ "customer_doc_type": "ruc", "customer_doc_number": "20123456789",
+  "customer_name": "...", "items": [{ "description": "...", "quantity": 1,
+  "item_type": "product", "unit_price": 100.00, "tax_type": "gravado" }] }
+
+# Receipts (Boletas)
+POST /api/v1/receipts  (same structure, customer_doc_type defaults to "dni")
+
+# Dispatch Guides — Remitente (GRR)
+POST /api/v1/dispatch-guides/remitente
+{ "transfer_reason": "venta", "transport_modality": "private",
+  "transfer_date": "2026-03-05", "gross_weight": "150",
+  "departure_address": "...", "departure_ubigeo": "150101",
+  "arrival_address": "...", "arrival_ubigeo": "150201",
+  "recipient_doc_type": "ruc", "recipient_doc_number": "20123456789",
+  "recipient_name": "...", "vehicle_plate": "ABC-123",
+  "driver_doc_type": "dni", "driver_doc_number": "12345678",
+  "driver_name": "...", "driver_license": "Q12345678",
+  "items": [{ "description": "Producto X", "quantity": 10, "unit_code": "NIU" }] }
+
+# Dispatch Guides — Transportista (GRT)
+POST /api/v1/dispatch-guides/transportista
+(same as GRR but requires shipper_* fields and always requires vehicle/driver)
+```
+
+### Querying & Retry
+
+```
+GET  /api/v1/documents                        # List invoices/receipts
+GET  /api/v1/documents/{id}                   # Detail with XML, CDR, items
+GET  /api/v1/documents/{id}/status            # Query SUNAT live status
+POST /api/v1/documents/{id}/retry             # Retry failed submission
+
+GET  /api/v1/dispatch-guides                  # List dispatch guides
+GET  /api/v1/dispatch-guides/{id}             # Detail
+GET  /api/v1/dispatch-guides/{id}/status      # Query SUNAT live status
+POST /api/v1/dispatch-guides/{id}/retry       # Retry failed submission
+```
+
+### Response Status Values
+
+`CREATED` → `SIGNED` → `SENT` → `ACCEPTED` / `REJECTED` / `ERROR`
+
+### SUNAT Catalog Quick Reference
+
+- **Document types:** `01` Factura, `03` Boleta, `09` GR Remitente, `31` GR Transportista
+- **Series prefixes:** `F` Factura, `B` Boleta, `T` GR Remitente, `V` GR Transportista
+- **Transport modality (Cat. 18):** `public` (carrier handles transport), `private` (own vehicle)
+- **Transfer reasons (Cat. 20):** `venta`, `compra`, `traslado_entre_establecimientos`, `importacion`, `exportacion`, `otros`
+- **Tax types (Cat. 07):** `gravado` (18% IGV), `exonerado`, `inafecto`
+- **Item types:** `product` (NIU), `service` (ZZ)
+
 ## Configuration
 
-Environment variables loaded via `pydantic-settings` from `.env` (see `.env.example`). Key vars: `DATABASE_URL`, `ENCRYPTION_KEY` (Fernet key), `SUNAT_SOAP_URL`, `IGV_RATE`.
+Environment variables loaded via `pydantic-settings` from `.env` (see `.env.example`). Key vars:
+
+- `DATABASE_URL` — PostgreSQL connection string
+- `ENCRYPTION_KEY` — Fernet key for encrypting SOL credentials and certificates
+- `SUNAT_SOAP_URL` — SUNAT SOAP endpoint for invoices/boletas (e.g. `https://e-factura.sunat.gob.pe/ol-ti-itcpfegem`)
+- `SUNAT_GRE_URL` — SUNAT SOAP endpoint for dispatch guides (**different host**, e.g. `https://e-guiaremision.sunat.gob.pe/ol-ti-itemision-guia-gem`)
+- `SUNAT_CONSULT_URL` — SUNAT status query endpoint (production only)
+- `IGV_RATE` — Tax rate (default `0.18`)
+
+**Important:** Invoices and dispatch guides use **different SUNAT hosts**. Both append `/billService` internally.
 
 Docker Compose exposes Postgres on host port **5434** (not 5432).
 
