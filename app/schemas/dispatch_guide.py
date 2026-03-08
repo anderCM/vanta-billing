@@ -49,6 +49,7 @@ class GRRCreate(ShipmentData):
     recipient_doc_type: GRDocType = GRDocType.ruc
     recipient_doc_number: str = Field(..., max_length=20)
     recipient_name: str = Field(..., max_length=255)
+    related_document_id: str | None = Field(None, description="UUID of a related invoice/receipt in this system")
     items: list[GRItemCreate] = Field(..., min_length=1)
 
     # Public transport fields
@@ -86,6 +87,7 @@ class GRTCreate(ShipmentData):
     recipient_doc_type: GRDocType = GRDocType.ruc
     recipient_doc_number: str = Field(..., max_length=20)
     recipient_name: str = Field(..., max_length=255)
+    related_document_id: str | None = Field(None, description="UUID of a related invoice/receipt in this system")
     items: list[GRItemCreate] = Field(..., min_length=1)
 
     # Shipper info (remitente — who sent the goods)
@@ -141,6 +143,9 @@ class DispatchGuideDetail(DispatchGuideRead):
     driver_name: str | None
     shipper_doc_number: str | None
     shipper_name: str | None
+    related_document_id: str | None
+    related_document_type: str | None
+    related_document_number: str | None
     xml_content: str | None
     xml_signed: str | None
     cdr_content: str | None
