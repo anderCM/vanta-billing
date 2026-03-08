@@ -71,7 +71,8 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 1. Client sends transport data to `POST /api/v1/dispatch-guides/remitente` (GRR, type "09", series T) or `/transportista` (GRT, type "31", series V)
 2. `gr_billing.py` translates enums to SUNAT catalog codes (no tax calculation needed)
-3. DispatchGuide + items persisted to DB with auto-incrementing correlative
+3. If `related_document_id` is provided, the related invoice/receipt is resolved and its type/number are stored + included in the XML as `<cac:AdditionalDocumentReference>`
+4. DispatchGuide + items persisted to DB with auto-incrementing correlative
 4. DespatchAdvice-2 UBL XML is built, signed with client's certificate, QR code generated
 5. Signed XML sent to SUNAT via SOAP (uses `SUNAT_GRE_URL`, separate from invoice endpoint); CDR response stored
 6. Failed guides can be retried via `POST /dispatch-guides/{id}/retry`
@@ -119,11 +120,13 @@ POST /api/v1/dispatch-guides/remitente
   "recipient_name": "...", "vehicle_plate": "ABC-123",
   "driver_doc_type": "dni", "driver_doc_number": "12345678",
   "driver_name": "...", "driver_license": "Q12345678",
+  "related_document_id": "uuid-of-invoice (optional)",
   "items": [{ "description": "Producto X", "quantity": 10, "unit_code": "NIU" }] }
 
 # Dispatch Guides — Transportista (GRT)
 POST /api/v1/dispatch-guides/transportista
 (same as GRR but requires shipper_* fields and always requires vehicle/driver)
+# Both GRR and GRT accept optional "related_document_id" to link to an existing invoice/receipt.
 ```
 
 ### Querying & Retry

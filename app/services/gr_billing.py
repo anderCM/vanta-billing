@@ -9,6 +9,7 @@ from app.exceptions import BillingError, MissingCredentialsError, XMLBuildError,
 from app.models.client import Client
 from app.models.dispatch_guide import DispatchGuide
 from app.models.dispatch_guide_item import DispatchGuideItem
+from app.models.document import Document
 from app.schemas.dispatch_guide import GRRCreate, GRTCreate
 from app.services.crypto import decrypt_string
 from app.services.integrations.sunat import send_gre_document
@@ -73,6 +74,19 @@ async def create_and_send_dispatch_guide(
     transport_modality_code = TRANSPORT_MODALITY_CODES[data.transport_modality.value]
     recipient_doc_type_code = CUSTOMER_DOC_TYPE_TO_CODE[data.recipient_doc_type.value]
 
+    # Resolve related document if provided
+    related_doc_type = None
+    related_doc_number = None
+    if data.related_document_id:
+        related_doc = db.query(Document).filter(
+            Document.id == data.related_document_id,
+            Document.client_id == client.id,
+        ).first()
+        if not related_doc:
+            raise BillingError("Related document not found or does not belong to this client")
+        related_doc_type = related_doc.document_type
+        related_doc_number = f"{related_doc.series}-{related_doc.correlative:08d}"
+
     correlative = _next_correlative(db, client.id, document_type, data.series)
     now = peru_now()
     issue_date = now.strftime("%Y-%m-%d")
@@ -95,6 +109,9 @@ async def create_and_send_dispatch_guide(
         recipient_doc_type=recipient_doc_type_code,
         recipient_doc_number=data.recipient_doc_number,
         recipient_name=data.recipient_name,
+        related_document_id=data.related_document_id,
+        related_document_type=related_doc_type,
+        related_document_number=related_doc_number,
         issue_date=peru_now(),
         status=DocumentStatus.CREATED,
     )
@@ -186,6 +203,8 @@ async def create_and_send_dispatch_guide(
             shipper_doc_type=guide.shipper_doc_type,
             shipper_doc_number=guide.shipper_doc_number,
             shipper_name=guide.shipper_name,
+            related_document_type=related_doc_type,
+            related_document_number=related_doc_number,
             items=items_for_xml,
         )
         guide.xml_content = xml_content

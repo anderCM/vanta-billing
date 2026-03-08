@@ -57,6 +57,11 @@ class DispatchGuide(Base):
     shipper_doc_number = Column(String(20), nullable=True)
     shipper_name = Column(String(255), nullable=True)
 
+    # Related document reference (optional link to invoice/receipt)
+    related_document_id = Column(String, ForeignKey("documents.id"), nullable=True)
+    related_document_type = Column(String(2), nullable=True)   # "01" factura, "03" boleta
+    related_document_number = Column(String(20), nullable=True)  # e.g. "F001-00000123"
+
     # Issue date
     issue_date = Column(DateTime, nullable=False)
 

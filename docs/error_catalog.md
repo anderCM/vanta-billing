@@ -135,6 +135,8 @@ Same fields as Invoice. The only difference is `customer_doc_type` defaults to `
 | `recipient_name` | Required, max 255 characters | `Field required` |
 | `items` | Required, at least 1 item | `List should have at least 1 item after validation, not 0` |
 
+| `related_document_id` | Optional, UUID of an existing invoice/receipt | `Related document not found or does not belong to this client` (HTTP 500) |
+
 **Conditional validation by transport modality:**
 
 | Modality | Required Fields | Error if Missing |
@@ -225,6 +227,7 @@ Includes all fields from GRR (section 2.6) plus these **required** fields:
 |-------|---------|-------|
 | Invalid status for retry | `Cannot retry dispatch guide in status '{status}'` | Same as documents — retry only for `SIGNED`, `ERROR`, or `REJECTED`. |
 | Missing signed XML | `Dispatch guide has no signed XML to send` | Guide was never successfully signed. |
+| Related document not found | `Related document not found or does not belong to this client` | The `related_document_id` provided does not match any invoice/receipt owned by the authenticated client. |
 
 ### HTTP 404 - Not Found
 

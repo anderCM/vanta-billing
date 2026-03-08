@@ -60,6 +60,9 @@ def build_despatch_advice_xml(
     shipper_doc_type: str | None,
     shipper_doc_number: str | None,
     shipper_name: str | None,
+    # Related document reference (optional)
+    related_document_type: str | None = None,
+    related_document_number: str | None = None,
     # Items
     items: list[dict],
 ) -> str:
@@ -98,6 +101,20 @@ def build_despatch_advice_xml(
     sig_attach = _el(sig_ref, CAC, "DigitalSignatureAttachment")
     sig_ext_ref = _el(sig_attach, CAC, "ExternalReference")
     _el(sig_ext_ref, CBC, "URI", f"#SIG-{doc_id}")
+
+    # AdditionalDocumentReference (optional: related invoice/receipt)
+    if related_document_type and related_document_number:
+        add_doc_ref = _el(root, CAC, "AdditionalDocumentReference")
+        _el(add_doc_ref, CBC, "ID", related_document_number)
+        _el(
+            add_doc_ref,
+            CBC,
+            "DocumentTypeCode",
+            related_document_type,
+            listAgencyName="PE:SUNAT",
+            listName="Tipo de Documento",
+            listURI="urn:pe:gob:sunat:cpe:see:gem:catalogos:catalogo01",
+        )
 
     # DespatchSupplierParty (issuer)
     supplier = _el(root, CAC, "DespatchSupplierParty")
