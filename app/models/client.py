@@ -22,6 +22,8 @@ class Client(Base):
     # SUNAT credentials (encrypted)
     sol_user = Column(Text, nullable=True)
     sol_password = Column(Text, nullable=True)
+    sunat_client_id = Column(Text, nullable=True)
+    sunat_client_secret = Column(Text, nullable=True)
     certificate = Column(LargeBinary, nullable=True)
     certificate_password = Column(Text, nullable=True)
 

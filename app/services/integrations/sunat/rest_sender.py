@@ -69,6 +69,8 @@ async def send_gre_document(
     correlative: int,
     sol_user: str,
     sol_password: str,
+    sunat_client_id: str | None = None,
+    sunat_client_secret: str | None = None,
 ) -> dict:
     """Send a signed GRE document to SUNAT via REST API.
 
@@ -87,7 +89,11 @@ async def send_gre_document(
 
     # Step 1: Get token
     token = await get_sunat_token(
-        ruc=ruc, sol_user=sol_user, sol_password=sol_password
+        ruc=ruc,
+        sol_user=sol_user,
+        sol_password=sol_password,
+        sunat_client_id=sunat_client_id,
+        sunat_client_secret=sunat_client_secret,
     )
 
     # Step 2: Send document

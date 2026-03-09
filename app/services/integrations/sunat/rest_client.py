@@ -15,20 +15,30 @@ logger = logging.getLogger(__name__)
 
 
 async def get_sunat_token(
-    *, ruc: str, sol_user: str, sol_password: str
+    *,
+    ruc: str,
+    sol_user: str,
+    sol_password: str,
+    sunat_client_id: str | None = None,
+    sunat_client_secret: str | None = None,
 ) -> str:
     """Obtain an OAuth2 access token from SUNAT's security endpoint.
 
     POST https://api-seguridad.sunat.gob.pe/v1/clientessol/{client_id}/oauth2/token
     Content-Type: application/x-www-form-urlencoded
 
+    Uses per-client credentials if provided, falls back to global settings.
     Returns the access_token string.
     """
-    client_id = settings.SUNAT_REST_CLIENT_ID
-    client_secret = settings.SUNAT_REST_KEY
+    client_id = sunat_client_id or settings.SUNAT_REST_CLIENT_ID
+    client_secret = sunat_client_secret or settings.SUNAT_REST_KEY
 
     if not client_id or not client_secret:
-        raise SUNATError("SUNAT REST credentials (SUNAT_REST_CLIENT_ID / SUNAT_REST_KEY) not configured")
+        raise SUNATError(
+            "SUNAT REST credentials not configured. "
+            "Set sunat_client_id/sunat_client_secret on the client, "
+            "or SUNAT_REST_CLIENT_ID/SUNAT_REST_KEY globally."
+        )
     if not settings.SUNAT_REST_TOKEN_URL:
         raise SUNATError("SUNAT_REST_TOKEN_URL not configured")
 

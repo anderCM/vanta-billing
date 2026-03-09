@@ -25,11 +25,13 @@ _UPDATABLE_FIELDS = {
     "serie_boleta",
     "serie_grr",
     "serie_grt",
+    "sunat_client_id",
+    "sunat_client_secret",
     "send_email",
     "generate_pdf",
 }
 
-_ENCRYPTED_FIELDS = {"sol_user", "sol_password"}
+_ENCRYPTED_FIELDS = {"sol_user", "sol_password", "sunat_client_id", "sunat_client_secret"}
 
 
 def register_client(
@@ -42,6 +44,8 @@ def register_client(
     ubigeo: str | None = None,
     sol_user: str | None = None,
     sol_password: str | None = None,
+    sunat_client_id: str | None = None,
+    sunat_client_secret: str | None = None,
 ) -> tuple[Client, str]:
     """Register a new client. Returns (client, api_key)."""
     existing = db.query(Client).filter(Client.ruc == ruc).first()
@@ -64,6 +68,10 @@ def register_client(
     if sol_user and sol_password:
         client.sol_user = encrypt_string(sol_user)
         client.sol_password = encrypt_string(sol_password)
+
+    if sunat_client_id and sunat_client_secret:
+        client.sunat_client_id = encrypt_string(sunat_client_id)
+        client.sunat_client_secret = encrypt_string(sunat_client_secret)
 
     db.add(client)
     db.commit()
