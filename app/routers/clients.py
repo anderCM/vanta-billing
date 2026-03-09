@@ -28,6 +28,8 @@ def create_client(data: ClientCreate, db: Session = Depends(get_db)):
             ubigeo=data.ubigeo,
             sol_user=data.sol_user,
             sol_password=data.sol_password,
+            sunat_client_id=data.sunat_client_id,
+            sunat_client_secret=data.sunat_client_secret,
         )
     except BillingError as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))

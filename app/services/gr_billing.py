@@ -2,7 +2,6 @@
 
 import logging
 
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.exceptions import BillingError, MissingCredentialsError, XMLBuildError, XMLSignError
@@ -11,6 +10,7 @@ from app.models.dispatch_guide import DispatchGuide
 from app.models.dispatch_guide_item import DispatchGuideItem
 from app.models.document import Document
 from app.schemas.dispatch_guide import GRRCreate, GRTCreate
+from app.services.correlative import next_correlative, rollback_on_pre_sunat_error, set_error_status
 from app.services.crypto import decrypt_string
 from app.services.integrations.sunat import send_gre_document
 from app.services.sunat_catalogs import (
@@ -32,32 +32,18 @@ from app.services.xml_signer import sign_xml
 logger = logging.getLogger(__name__)
 
 
-def _next_correlative(db: Session, client_id: str, document_type: str, series: str) -> int:
-    result = db.execute(
-        text(
-            """
-            INSERT INTO document_series (client_id, document_type, series, current_correlative)
-            VALUES (:client_id, :doc_type, :series, 1)
-            ON CONFLICT ON CONSTRAINT uq_client_doc_type_series
-            DO UPDATE SET current_correlative = document_series.current_correlative + 1
-            RETURNING current_correlative
-            """
-        ),
-        {"client_id": client_id, "doc_type": document_type, "series": series},
-    )
-    return result.scalar_one()
-
-
 def _validate_client_credentials(client: Client) -> None:
     if not client.sol_user or not client.sol_password:
         raise MissingCredentialsError("SOL credentials not configured")
     if not client.certificate or not client.certificate_password:
         raise MissingCredentialsError("Digital certificate not uploaded")
-
-
-def _set_error_status(db: Session, guide: DispatchGuide) -> None:
-    guide.status = DocumentStatus.ERROR
-    db.commit()
+    if not client.sunat_client_id or not client.sunat_client_secret:
+        from app.config import settings
+        if not settings.SUNAT_REST_CLIENT_ID or not settings.SUNAT_REST_KEY:
+            raise MissingCredentialsError(
+                "SUNAT REST API credentials (sunat_client_id/sunat_client_secret) not configured. "
+                "Register your application in SUNAT's SOL portal and configure these credentials."
+            )
 
 
 async def create_and_send_dispatch_guide(
@@ -87,7 +73,7 @@ async def create_and_send_dispatch_guide(
         related_doc_type = related_doc.document_type
         related_doc_number = f"{related_doc.series}-{related_doc.correlative:08d}"
 
-    correlative = _next_correlative(db, client.id, document_type, data.series)
+    correlative = next_correlative(db, client.id, document_type, data.series)
     now = peru_now()
     issue_date = now.strftime("%Y-%m-%d")
     issue_time = now.strftime("%H:%M:%S")
@@ -210,7 +196,7 @@ async def create_and_send_dispatch_guide(
         guide.xml_content = xml_content
     except (ValueError, KeyError, TypeError) as e:
         logger.error("XML build failed for dispatch guide %s: %s", guide.id, e)
-        _set_error_status(db, guide)
+        rollback_on_pre_sunat_error(db)
         raise XMLBuildError(f"Failed to build GR XML: {e}") from e
 
     # Sign XML
@@ -220,7 +206,7 @@ async def create_and_send_dispatch_guide(
         guide.status = DocumentStatus.SIGNED
     except (ValueError, OSError) as e:
         logger.error("XML signing failed for dispatch guide %s: %s", guide.id, e)
-        _set_error_status(db, guide)
+        rollback_on_pre_sunat_error(db)
         raise XMLSignError(f"Failed to sign GR XML: {e}") from e
 
     # Generate QR code
@@ -246,6 +232,8 @@ async def create_and_send_dispatch_guide(
     try:
         sol_user = decrypt_string(client.sol_user)
         sol_password = decrypt_string(client.sol_password)
+        sunat_client_id = decrypt_string(client.sunat_client_id) if client.sunat_client_id else None
+        sunat_client_secret = decrypt_string(client.sunat_client_secret) if client.sunat_client_secret else None
 
         cdr = await send_gre_document(
             xml_signed=xml_signed,
@@ -255,6 +243,8 @@ async def create_and_send_dispatch_guide(
             correlative=correlative,
             sol_user=sol_user,
             sol_password=sol_password,
+            sunat_client_id=sunat_client_id,
+            sunat_client_secret=sunat_client_secret,
         )
 
         guide.cdr_content = cdr.get("cdr_content")
@@ -269,7 +259,7 @@ async def create_and_send_dispatch_guide(
             guide.cdr_code,
         )
     except BillingError:
-        _set_error_status(db, guide)
+        set_error_status(db, guide)
         raise
 
     db.commit()
@@ -291,6 +281,8 @@ async def retry_send_dispatch_guide(
 
     sol_user = decrypt_string(client.sol_user)
     sol_password = decrypt_string(client.sol_password)
+    sunat_client_id = decrypt_string(client.sunat_client_id) if client.sunat_client_id else None
+    sunat_client_secret = decrypt_string(client.sunat_client_secret) if client.sunat_client_secret else None
 
     try:
         cdr = await send_gre_document(
@@ -301,13 +293,15 @@ async def retry_send_dispatch_guide(
             correlative=guide.correlative,
             sol_user=sol_user,
             sol_password=sol_password,
+            sunat_client_id=sunat_client_id,
+            sunat_client_secret=sunat_client_secret,
         )
         guide.cdr_content = cdr.get("cdr_content")
         guide.cdr_code = cdr.get("cdr_code")
         guide.cdr_description = cdr.get("cdr_description")
         guide.status = cdr.get("status", DocumentStatus.SENT)
     except BillingError:
-        _set_error_status(db, guide)
+        set_error_status(db, guide)
         raise
 
     db.commit()
@@ -346,9 +340,15 @@ async def check_dispatch_guide_status(
 
     sol_user = decrypt_string(client.sol_user)
     sol_password = decrypt_string(client.sol_password)
+    sunat_client_id = decrypt_string(client.sunat_client_id) if client.sunat_client_id else None
+    sunat_client_secret = decrypt_string(client.sunat_client_secret) if client.sunat_client_secret else None
 
     token = await get_sunat_token(
-        ruc=client.ruc, sol_user=sol_user, sol_password=sol_password
+        ruc=client.ruc,
+        sol_user=sol_user,
+        sol_password=sol_password,
+        sunat_client_id=sunat_client_id,
+        sunat_client_secret=sunat_client_secret,
     )
 
     ticket_response = await call_get_ticket_status(token=token, ticket=ticket)
