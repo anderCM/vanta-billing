@@ -11,6 +11,8 @@ class ClientCreate(BaseModel):
     ubigeo: str | None = Field(None, max_length=6)
     sol_user: str | None = None
     sol_password: str | None = None
+    sunat_client_id: str | None = None
+    sunat_client_secret: str | None = None
 
 
 class ClientCreateResponse(BaseModel):
@@ -29,6 +31,7 @@ class ClientRead(BaseModel):
     direccion: str | None
     ubigeo: str | None
     has_sol_credentials: bool
+    has_sunat_rest_credentials: bool
     has_certificate: bool
     serie_factura: str | None
     serie_boleta: str | None
@@ -55,6 +58,7 @@ class ClientRead(BaseModel):
                 "direccion": data.direccion,
                 "ubigeo": data.ubigeo,
                 "has_sol_credentials": bool(data.sol_user and data.sol_password),
+                "has_sunat_rest_credentials": bool(data.sunat_client_id and data.sunat_client_secret),
                 "has_certificate": bool(data.certificate),
                 "serie_factura": data.serie_factura,
                 "serie_boleta": data.serie_boleta,
@@ -76,6 +80,8 @@ class ClientUpdate(BaseModel):
     ubigeo: str | None = None
     sol_user: str | None = None
     sol_password: str | None = None
+    sunat_client_id: str | None = None
+    sunat_client_secret: str | None = None
     serie_factura: str | None = Field(None, max_length=4)
     serie_boleta: str | None = Field(None, max_length=4)
     serie_grr: str | None = Field(None, max_length=4)

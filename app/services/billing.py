@@ -1,7 +1,6 @@
 import logging
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -10,6 +9,7 @@ from app.models.client import Client
 from app.models.document import Document
 from app.models.document_item import DocumentItem
 from app.schemas.document import InvoiceCreate, ReceiptCreate
+from app.services.correlative import next_correlative, rollback_on_pre_sunat_error, set_error_status
 from app.services.crypto import decrypt_string
 from app.services.integrations.sunat import query_document_status, send_document
 from app.services.sunat_catalogs import (
@@ -29,21 +29,6 @@ logger = logging.getLogger(__name__)
 
 IGV_RATE = Decimal(str(settings.IGV_RATE))
 
-
-def _next_correlative(db: Session, client_id: str, document_type: str, series: str) -> int:
-    result = db.execute(
-        text(
-            """
-            INSERT INTO document_series (client_id, document_type, series, current_correlative)
-            VALUES (:client_id, :doc_type, :series, 1)
-            ON CONFLICT ON CONSTRAINT uq_client_doc_type_series
-            DO UPDATE SET current_correlative = document_series.current_correlative + 1
-            RETURNING current_correlative
-            """
-        ),
-        {"client_id": client_id, "doc_type": document_type, "series": series},
-    )
-    return result.scalar_one()
 
 
 def _translate_items(data: InvoiceCreate | ReceiptCreate) -> list[dict]:
@@ -115,11 +100,6 @@ def _validate_client_credentials(client: Client) -> None:
         raise MissingCredentialsError("Digital certificate not uploaded")
 
 
-def _set_error_status(db: Session, document: Document) -> None:
-    """Mark document as ERROR and commit. Used when the flow fails after persistence."""
-    document.status = DocumentStatus.ERROR
-    db.commit()
-
 
 async def create_and_send_document(
     db: Session,
@@ -135,7 +115,7 @@ async def create_and_send_document(
     customer_doc_type = CUSTOMER_DOC_TYPE_TO_CODE[data.customer_doc_type.value]
     calculated_items, total_gravada, total_igv, total_amount = _calculate_items(items_data)
 
-    correlative = _next_correlative(db, client.id, document_type, data.series)
+    correlative = next_correlative(db, client.id, document_type, data.series)
     issue_date = peru_issue_date()
 
     document = Document(
@@ -200,7 +180,7 @@ async def create_and_send_document(
         document.xml_content = xml_content
     except (ValueError, KeyError, TypeError) as e:
         logger.error("XML build failed for document %s: %s", document.id, e)
-        _set_error_status(db, document)
+        rollback_on_pre_sunat_error(db)
         raise XMLBuildError(f"Failed to build XML: {e}") from e
 
     # Sign XML
@@ -210,7 +190,7 @@ async def create_and_send_document(
         document.status = DocumentStatus.SIGNED
     except (ValueError, OSError) as e:
         logger.error("XML signing failed for document %s: %s", document.id, e)
-        _set_error_status(db, document)
+        rollback_on_pre_sunat_error(db)
         raise XMLSignError(f"Failed to sign XML: {e}") from e
 
     # Generate QR code
@@ -259,7 +239,7 @@ async def create_and_send_document(
             document.id, document.status, document.cdr_code,
         )
     except BillingError:
-        _set_error_status(db, document)
+        set_error_status(db, document)
         raise
 
     db.commit()
@@ -300,7 +280,7 @@ async def retry_send_document(db: Session, client: Client, document: Document) -
 
         logger.info("Retry successful for document %s: status=%s", document.id, document.status)
     except BillingError:
-        _set_error_status(db, document)
+        set_error_status(db, document)
         raise
 
     db.commit()
