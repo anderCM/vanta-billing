@@ -35,6 +35,8 @@ class Client(Base):
     serie_boleta = Column(String(4), nullable=True)   # e.g. B001
     serie_grr = Column(String(4), nullable=True)      # e.g. T001
     serie_grt = Column(String(4), nullable=True)      # e.g. V001
+    serie_nota_credito_factura = Column(String(4), nullable=True)  # e.g. FC01
+    serie_nota_credito_boleta = Column(String(4), nullable=True)   # e.g. BC01
 
     # Service flags
     send_email = Column(Boolean, default=False, nullable=False)

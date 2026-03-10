@@ -10,7 +10,7 @@ from app.models.dispatch_guide import DispatchGuide
 from app.models.dispatch_guide_item import DispatchGuideItem
 from app.models.document import Document
 from app.schemas.dispatch_guide import GRRCreate, GRTCreate
-from app.services.correlative import next_correlative, rollback_on_pre_sunat_error, set_error_status
+from app.services.correlative import attach_next_correlative, next_correlative, rollback_on_pre_sunat_error, set_error_status
 from app.services.crypto import decrypt_string
 from app.services.integrations.sunat import send_gre_document
 from app.services.sunat_catalogs import (
@@ -264,6 +264,7 @@ async def create_and_send_dispatch_guide(
 
     db.commit()
     db.refresh(guide)
+    attach_next_correlative(db, guide, client.id, document_type, data.series)
     return guide
 
 

@@ -25,6 +25,8 @@ _UPDATABLE_FIELDS = {
     "serie_boleta",
     "serie_grr",
     "serie_grt",
+    "serie_nota_credito_factura",
+    "serie_nota_credito_boleta",
     "sunat_client_id",
     "sunat_client_secret",
     "send_email",

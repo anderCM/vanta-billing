@@ -7,13 +7,13 @@ from app.config import settings
 from app.exceptions import BillingError, MissingCredentialsError, XMLBuildError, XMLSignError
 from app.models.client import Client
 from app.models.document import Document
-from app.models.document_installment import DocumentInstallment
 from app.models.document_item import DocumentItem
-from app.schemas.document import InvoiceCreate, ReceiptCreate
+from app.schemas.credit_note import CreditNoteCreate
 from app.services.correlative import attach_next_correlative, next_correlative, rollback_on_pre_sunat_error, set_error_status
 from app.services.crypto import decrypt_string
 from app.services.integrations.sunat import query_document_status, send_document
 from app.services.sunat_catalogs import (
+    CREDIT_NOTE_REASON_CODES,
     CUSTOMER_DOC_TYPE_TO_CODE,
     ITEM_TYPE_TO_UNIT_CODE,
     TAX_TYPE_TO_IGV_CODE,
@@ -23,17 +23,17 @@ from app.services.sunat_catalogs import (
     peru_now,
 )
 from app.services.qr_generator import build_qr_text, extract_signature_values, generate_qr_image
-from app.services.xml_builder import build_invoice_xml
+from app.services.xml_builder_cn import build_credit_note_xml
 from app.services.xml_signer import sign_xml
 
 logger = logging.getLogger(__name__)
 
 IGV_RATE = Decimal(str(settings.IGV_RATE))
 
+DOCUMENT_TYPE_CREDIT_NOTE = "07"
 
 
-def _translate_items(data: InvoiceCreate | ReceiptCreate) -> list[dict]:
-    """Translate user-friendly schema values to SUNAT catalog codes."""
+def _translate_items(data: CreditNoteCreate) -> list[dict]:
     return [
         {
             "description": item.description,
@@ -47,12 +47,7 @@ def _translate_items(data: InvoiceCreate | ReceiptCreate) -> list[dict]:
 
 
 def _calculate_items(items_data: list[dict]) -> tuple[list[dict], Decimal, Decimal, Decimal]:
-    """Calculate SUNAT line amounts from unit prices.
-
-    unit_price is received WITH IGV included for gravado items.
-    We extract the base price (sin IGV) for SUNAT's XML requirements.
-    For exonerado/inafecto, unit_price has no IGV component.
-    """
+    """Calculate SUNAT line amounts. unit_price WITH IGV for gravado items."""
     calculated = []
     total_gravada = Decimal("0")
     total_exonerada = Decimal("0")
@@ -65,7 +60,6 @@ def _calculate_items(items_data: list[dict]) -> tuple[list[dict], Decimal, Decim
         igv_type = item["igv_type"]
 
         if igv_type.startswith(IGVGroup.GRAVADO):
-            # unit_price comes WITH IGV — extract base price
             price_with_igv = unit_price
             base_price = (unit_price / (1 + IGV_RATE)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             line_extension = (qty * base_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -77,7 +71,7 @@ def _calculate_items(items_data: list[dict]) -> tuple[list[dict], Decimal, Decim
             line_extension = (qty * unit_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             igv = Decimal("0.00")
             total_exonerada += line_extension
-        else:  # IGVGroup.INAFECTO
+        else:
             base_price = unit_price
             price_with_igv = unit_price
             line_extension = (qty * unit_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -110,39 +104,55 @@ def _validate_client_credentials(client: Client) -> None:
         raise MissingCredentialsError("Digital certificate not uploaded")
 
 
-
-async def create_and_send_document(
+async def create_and_send_credit_note(
     db: Session,
     client: Client,
     *,
-    document_type: str,
-    data: InvoiceCreate | ReceiptCreate,
+    data: CreditNoteCreate,
 ) -> Document:
-    """Full flow: translate → calculate → persist → XML → sign → send to SUNAT."""
+    """Full flow: validate ref → calculate → persist → XML → sign → send to SUNAT."""
     _validate_client_credentials(client)
 
+    # Resolve reference document
+    ref_document = db.query(Document).filter(
+        Document.id == data.reference_document_id,
+        Document.client_id == client.id,
+    ).first()
+    if not ref_document:
+        raise BillingError("Reference document not found")
+    if ref_document.document_type not in ("01", "03"):
+        raise BillingError("Credit notes can only reference invoices (01) or receipts (03)")
+
+    reason_code = CREDIT_NOTE_REASON_CODES[data.reason_code.value]
+
     items_data = _translate_items(data)
-    customer_doc_type = CUSTOMER_DOC_TYPE_TO_CODE[data.customer_doc_type.value]
     calculated_items, total_gravada, total_igv, total_amount = _calculate_items(items_data)
 
-    correlative = next_correlative(db, client.id, document_type, data.series)
+    series = data.series
+    correlative = next_correlative(db, client.id, DOCUMENT_TYPE_CREDIT_NOTE, series)
     issue_date = peru_issue_date()
 
     document = Document(
         client_id=client.id,
-        document_type=document_type,
-        series=data.series,
+        document_type=DOCUMENT_TYPE_CREDIT_NOTE,
+        series=series,
         correlative=correlative,
-        customer_doc_type=customer_doc_type,
-        customer_doc_number=data.customer_doc_number,
-        customer_name=data.customer_name,
-        customer_address=data.customer_address,
+        customer_doc_type=ref_document.customer_doc_type,
+        customer_doc_number=ref_document.customer_doc_number,
+        customer_name=ref_document.customer_name,
+        customer_address=ref_document.customer_address,
         issue_date=peru_now(),
-        currency=data.currency,
+        currency=ref_document.currency,
         total_gravada=total_gravada,
         total_igv=total_igv,
         total_amount=total_amount,
-        payment_condition=data.payment_condition,
+        payment_condition="contado",
+        credit_note_reason_code=reason_code,
+        credit_note_description=data.description,
+        reference_document_id=ref_document.id,
+        reference_document_type=ref_document.document_type,
+        reference_document_series=ref_document.series,
+        reference_document_correlative=ref_document.correlative,
         status=DocumentStatus.CREATED,
     )
     db.add(document)
@@ -159,59 +169,44 @@ async def create_and_send_document(
             igv=item["igv"],
             total=item["total"],
         ))
-
-    installments_data = None
-    if data.payment_condition == "credito" and data.installments:
-        installments_sum = sum(inst.amount for inst in data.installments)
-        if installments_sum != total_amount:
-            rollback_on_pre_sunat_error(db)
-            raise BillingError(
-                f"Sum of installments ({installments_sum}) must equal total_amount ({total_amount})"
-            )
-        installments_data = []
-        for idx, inst in enumerate(data.installments, 1):
-            db.add(DocumentInstallment(
-                document_id=document.id,
-                installment_number=idx,
-                amount=inst.amount,
-                due_date=inst.due_date,
-            ))
-            installments_data.append({"amount": inst.amount, "due_date": inst.due_date})
-
     db.flush()
 
     logger.info(
-        "Document %s created: %s-%s-%d for client %s",
-        document.id, document_type, data.series, correlative, client.id,
+        "Credit note %s created: 07-%s-%d referencing %s-%s-%d for client %s",
+        document.id, series, correlative,
+        ref_document.document_type, ref_document.series, ref_document.correlative,
+        client.id,
     )
 
     # Build XML
     try:
-        xml_content = build_invoice_xml(
-            document_type=document_type,
-            series=data.series,
+        xml_content = build_credit_note_xml(
+            series=series,
             correlative=correlative,
             issue_date=issue_date,
-            currency=data.currency,
+            currency=ref_document.currency,
             supplier_ruc=client.ruc,
             supplier_name=client.razon_social,
             supplier_trade_name=client.nombre_comercial,
             supplier_address=client.direccion,
             supplier_ubigeo=client.ubigeo,
-            customer_doc_type=customer_doc_type,
-            customer_doc_number=data.customer_doc_number,
-            customer_name=data.customer_name,
-            customer_address=data.customer_address,
+            customer_doc_type=ref_document.customer_doc_type,
+            customer_doc_number=ref_document.customer_doc_number,
+            customer_name=ref_document.customer_name,
+            customer_address=ref_document.customer_address,
+            reason_code=reason_code,
+            description=data.description,
+            ref_document_type=ref_document.document_type,
+            ref_series=ref_document.series,
+            ref_correlative=ref_document.correlative,
             items=calculated_items,
             total_gravada=total_gravada,
             total_igv=total_igv,
             total_amount=total_amount,
-            payment_condition=data.payment_condition,
-            installments=installments_data,
         )
         document.xml_content = xml_content
     except (ValueError, KeyError, TypeError) as e:
-        logger.error("XML build failed for document %s: %s", document.id, e)
+        logger.error("XML build failed for credit note %s: %s", document.id, e)
         rollback_on_pre_sunat_error(db)
         raise XMLBuildError(f"Failed to build XML: {e}") from e
 
@@ -221,7 +216,7 @@ async def create_and_send_document(
         document.xml_signed = xml_signed
         document.status = DocumentStatus.SIGNED
     except (ValueError, OSError) as e:
-        logger.error("XML signing failed for document %s: %s", document.id, e)
+        logger.error("XML signing failed for credit note %s: %s", document.id, e)
         rollback_on_pre_sunat_error(db)
         raise XMLSignError(f"Failed to sign XML: {e}") from e
 
@@ -230,21 +225,21 @@ async def create_and_send_document(
         digest_value, signature_value = extract_signature_values(xml_signed)
         qr_text = build_qr_text(
             ruc=client.ruc,
-            document_type=document_type,
-            series=data.series,
+            document_type=DOCUMENT_TYPE_CREDIT_NOTE,
+            series=series,
             correlative=correlative,
             total_igv=str(total_igv),
             total_amount=str(total_amount),
             issue_date=issue_date,
-            customer_doc_type=customer_doc_type,
-            customer_doc_number=data.customer_doc_number,
+            customer_doc_type=ref_document.customer_doc_type,
+            customer_doc_number=ref_document.customer_doc_number,
             digest_value=digest_value,
             signature_value=signature_value,
         )
         document.qr_text = qr_text
         document.qr_image = generate_qr_image(qr_text)
     except Exception as e:
-        logger.warning("QR generation failed for document %s: %s", document.id, e)
+        logger.warning("QR generation failed for credit note %s: %s", document.id, e)
 
     # Send to SUNAT
     try:
@@ -254,8 +249,8 @@ async def create_and_send_document(
         cdr = await send_document(
             xml_signed=xml_signed,
             ruc=client.ruc,
-            document_type=document_type,
-            series=data.series,
+            document_type=DOCUMENT_TYPE_CREDIT_NOTE,
+            series=series,
             correlative=correlative,
             sol_user=sol_user,
             sol_password=sol_password,
@@ -267,7 +262,7 @@ async def create_and_send_document(
         document.status = cdr.get("status", DocumentStatus.SENT)
 
         logger.info(
-            "Document %s sent to SUNAT: status=%s code=%s",
+            "Credit note %s sent to SUNAT: status=%s code=%s",
             document.id, document.status, document.cdr_code,
         )
     except BillingError:
@@ -276,12 +271,12 @@ async def create_and_send_document(
 
     db.commit()
     db.refresh(document)
-    attach_next_correlative(db, document, client.id, document_type, data.series)
+    attach_next_correlative(db, document, client.id, DOCUMENT_TYPE_CREDIT_NOTE, series)
     return document
 
 
-async def retry_send_document(db: Session, client: Client, document: Document) -> Document:
-    """Retry sending a document in SIGNED, ERROR or REJECTED status."""
+async def retry_send_credit_note(db: Session, client: Client, document: Document) -> Document:
+    """Retry sending a credit note in SIGNED, ERROR or REJECTED status."""
     _validate_client_credentials(client)
 
     retryable = {DocumentStatus.SIGNED, DocumentStatus.ERROR, DocumentStatus.REJECTED}
@@ -290,7 +285,7 @@ async def retry_send_document(db: Session, client: Client, document: Document) -
     if not document.xml_signed:
         raise BillingError("Document has no signed XML to send")
 
-    logger.info("Retrying send for document %s (current status: %s)", document.id, document.status)
+    logger.info("Retrying send for credit note %s (current status: %s)", document.id, document.status)
 
     sol_user = decrypt_string(client.sol_user)
     sol_password = decrypt_string(client.sol_password)
@@ -311,51 +306,10 @@ async def retry_send_document(db: Session, client: Client, document: Document) -
         document.cdr_description = cdr.get("cdr_description")
         document.status = cdr.get("status", DocumentStatus.SENT)
 
-        logger.info("Retry successful for document %s: status=%s", document.id, document.status)
+        logger.info("Retry successful for credit note %s: status=%s", document.id, document.status)
     except BillingError:
         set_error_status(db, document)
         raise
-
-    db.commit()
-    db.refresh(document)
-    return document
-
-
-async def check_document_status(db: Session, client: Client, document: Document) -> Document:
-    """Query SUNAT for the current status of a document.
-
-    If SUNAT_CONSULT_URL is not configured (beta environment), returns
-    the document with its current locally stored status without querying SUNAT.
-    """
-    _validate_client_credentials(client)
-
-    sol_user = decrypt_string(client.sol_user)
-    sol_password = decrypt_string(client.sol_password)
-
-    logger.info("Querying SUNAT status for document %s", document.id)
-
-    cdr = await query_document_status(
-        ruc=client.ruc,
-        document_type=document.document_type,
-        series=document.series,
-        correlative=document.correlative,
-        sol_user=sol_user,
-        sol_password=sol_password,
-    )
-
-    if cdr is None:
-        logger.info(
-            "No SUNAT consult service configured, returning local status for document %s: status=%s",
-            document.id, document.status,
-        )
-        return document
-
-    document.cdr_content = cdr.get("cdr_content") or document.cdr_content
-    document.cdr_code = cdr.get("cdr_code") or document.cdr_code
-    document.cdr_description = cdr.get("cdr_description") or document.cdr_description
-    document.status = cdr.get("status", document.status)
-
-    logger.info("Status query result for document %s: status=%s", document.id, document.status)
 
     db.commit()
     db.refresh(document)
