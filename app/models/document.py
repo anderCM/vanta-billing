@@ -22,7 +22,7 @@ class Document(Base):
     client_id = Column(String, ForeignKey("clients.id"), nullable=False)
 
     # Document identity
-    document_type = Column(String(2), nullable=False)  # "01" or "03"
+    document_type = Column(String(2), nullable=False)  # "01", "03", or "07"
     series = Column(String(4), nullable=False)
     correlative = Column(Integer, nullable=False)
 
@@ -54,6 +54,17 @@ class Document(Base):
     qr_text = Column(Text, nullable=True)
     qr_image = Column(Text, nullable=True)
 
+    # Payment condition
+    payment_condition = Column(String(10), default="contado", nullable=False)
+
+    # Credit note fields (only for document_type "07")
+    credit_note_reason_code = Column(String(2), nullable=True)
+    credit_note_description = Column(String(500), nullable=True)
+    reference_document_id = Column(String, ForeignKey("documents.id"), nullable=True)
+    reference_document_type = Column(String(2), nullable=True)
+    reference_document_series = Column(String(4), nullable=True)
+    reference_document_correlative = Column(Integer, nullable=True)
+
     # Status
     status = Column(String(20), default=DocumentStatus.CREATED, nullable=False)
 
@@ -66,3 +77,4 @@ class Document(Base):
     # Relationships
     client = relationship("Client", back_populates="documents")
     items = relationship("DocumentItem", back_populates="document")
+    installments = relationship("DocumentInstallment", back_populates="document")

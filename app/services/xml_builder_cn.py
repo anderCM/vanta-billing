@@ -2,26 +2,22 @@ from decimal import Decimal
 
 from lxml import etree
 
-NAMESPACES = {
-    None: "urn:oasis:names:specification:ubl:schema:xsd:Invoice-2",
+CN_NAMESPACES = {
+    None: "urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2",
     "cac": "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2",
     "cbc": "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
-    "ccts": "urn:un:unece:uncefact:documentation:2",
     "ds": "http://www.w3.org/2000/09/xmldsig#",
     "ext": "urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2",
-    "qdt": "urn:oasis:names:specification:ubl:schema:xsd:QualifiedDatatypes-2",
-    "udt": "urn:un:unece:uncefact:data:specification:UnqualifiedDataTypesSchemaModule:2",
 }
 
 CBC = "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"
 CAC = "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
 EXT = "urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2"
 
-# Catálogo 05 - Tax scheme mapping by igv_type prefix
 TAX_SCHEMES = {
-    "1": {"id": "1000", "name": "IGV", "code": "VAT"},       # Gravado
-    "2": {"id": "9997", "name": "EXO", "code": "VAT"},       # Exonerado
-    "3": {"id": "9998", "name": "INA", "code": "FRE"},       # Inafecto
+    "1": {"id": "1000", "name": "IGV", "code": "VAT"},
+    "2": {"id": "9997", "name": "EXO", "code": "VAT"},
+    "3": {"id": "9998", "name": "INA", "code": "FRE"},
 }
 
 
@@ -33,12 +29,10 @@ def _el(parent, ns, tag, text=None, **attribs):
 
 
 def _amount(parent, ns, tag, value, currency="PEN"):
-    """Format monetary amounts with exactly 2 decimal places."""
     _el(parent, ns, tag, f"{Decimal(value):.2f}", currencyID=currency)
 
 
 def _price(parent, ns, tag, value, currency="PEN"):
-    """Format unit prices with up to 10 decimal places (strips trailing zeros)."""
     formatted = f"{Decimal(value):.10f}".rstrip("0")
     if formatted.endswith("."):
         formatted += "0"
@@ -46,7 +40,6 @@ def _price(parent, ns, tag, value, currency="PEN"):
 
 
 def _quantity(parent, ns, tag, value, unit_code="NIU"):
-    """Format quantities with up to 10 decimal places."""
     formatted = f"{Decimal(value):.10f}".rstrip("0")
     if formatted.endswith("."):
         formatted += "0"
@@ -58,9 +51,8 @@ def _quantity(parent, ns, tag, value, unit_code="NIU"):
     )
 
 
-def build_invoice_xml(
+def build_credit_note_xml(
     *,
-    document_type: str,
     series: str,
     correlative: int,
     issue_date: str,
@@ -74,14 +66,19 @@ def build_invoice_xml(
     customer_doc_number: str,
     customer_name: str,
     customer_address: str | None,
+    # Credit note specific
+    reason_code: str,
+    description: str,
+    ref_document_type: str,
+    ref_series: str,
+    ref_correlative: int,
+    # Items & totals
     items: list[dict],
     total_gravada: Decimal,
     total_igv: Decimal,
     total_amount: Decimal,
-    payment_condition: str = "contado",
-    installments: list[dict] | None = None,
 ) -> str:
-    root = etree.Element("Invoice", nsmap=NAMESPACES)
+    root = etree.Element("CreditNote", nsmap=CN_NAMESPACES)
 
     # UBL Extensions (placeholder for signature)
     ext_container = _el(root, EXT, "UBLExtensions")
@@ -96,16 +93,20 @@ def build_invoice_xml(
     doc_id = f"{series}-{correlative:08d}"
     _el(root, CBC, "ID", doc_id)
     _el(root, CBC, "IssueDate", issue_date)
-    _el(
-        root, CBC, "InvoiceTypeCode", document_type,
-        listAgencyName="PE:SUNAT",
-        listName="Tipo de Documento",
-        listURI="urn:pe:gob:sunat:cpe:see:gem:catalogos:catalogo01",
-        listID="0101",
-        listSchemeURI="urn:pe:gob:sunat:cpe:see:gem:catalogos:catalogo51",
-        name="Tipo de Operacion",
-    )
     _el(root, CBC, "DocumentCurrencyCode", currency)
+
+    # DiscrepancyResponse — reason for credit note
+    ref_doc_id = f"{ref_series}-{ref_correlative:08d}"
+    discrepancy = _el(root, CAC, "DiscrepancyResponse")
+    _el(discrepancy, CBC, "ReferenceID", ref_doc_id)
+    _el(discrepancy, CBC, "ResponseCode", reason_code)
+    _el(discrepancy, CBC, "Description", description)
+
+    # BillingReference — the document being credited
+    billing_ref = _el(root, CAC, "BillingReference")
+    invoice_ref = _el(billing_ref, CAC, "InvoiceDocumentReference")
+    _el(invoice_ref, CBC, "ID", ref_doc_id)
+    _el(invoice_ref, CBC, "DocumentTypeCode", ref_document_type)
 
     # Signature reference
     sig_ref = _el(root, CAC, "Signature")
@@ -148,29 +149,10 @@ def build_invoice_xml(
         cust_addr = _el(customer_legal, CAC, "RegistrationAddress")
         _el(cust_addr, CBC, "StreetName", customer_address)
 
-    # Payment Terms
-    if payment_condition == "credito" and installments:
-        payment_terms = _el(root, CAC, "PaymentTerms")
-        _el(payment_terms, CBC, "ID", "FormaPago")
-        _el(payment_terms, CBC, "PaymentMeansID", "Credito")
-        _amount(payment_terms, CBC, "Amount", total_amount, currency)
-
-        for idx, installment in enumerate(installments, 1):
-            cuota = _el(root, CAC, "PaymentTerms")
-            _el(cuota, CBC, "ID", "FormaPago")
-            _el(cuota, CBC, "PaymentMeansID", f"Cuota{idx:03d}")
-            _amount(cuota, CBC, "Amount", installment["amount"], currency)
-            _el(cuota, CBC, "PaymentDueDate", str(installment["due_date"]))
-    else:
-        payment_terms = _el(root, CAC, "PaymentTerms")
-        _el(payment_terms, CBC, "ID", "FormaPago")
-        _el(payment_terms, CBC, "PaymentMeansID", "Contado")
-
     # Tax Total
     tax_total = _el(root, CAC, "TaxTotal")
     _amount(tax_total, CBC, "TaxAmount", total_igv, currency)
 
-    # Group items by tax type for document-level TaxSubtotals
     tax_groups: dict[str, dict] = {}
     for item in items:
         igv_type = item.get("igv_type", "10")
@@ -197,25 +179,23 @@ def build_invoice_xml(
     _amount(monetary, CBC, "TaxInclusiveAmount", total_amount, currency)
     _amount(monetary, CBC, "PayableAmount", total_amount, currency)
 
-    # Invoice Lines
+    # Credit Note Lines
     for idx, item in enumerate(items, 1):
         igv_type = item.get("igv_type", "10")
         prefix = igv_type[0]
         scheme = TAX_SCHEMES.get(prefix, TAX_SCHEMES["1"])
         igv_percent = "18.00" if prefix == "1" else "0.00"
 
-        line = _el(root, CAC, "InvoiceLine")
+        line = _el(root, CAC, "CreditNoteLine")
         _el(line, CBC, "ID", str(idx))
-        _quantity(line, CBC, "InvoicedQuantity", item["quantity"], item.get("unit_code", "NIU"))
+        _quantity(line, CBC, "CreditedQuantity", item["quantity"], item.get("unit_code", "NIU"))
         _amount(line, CBC, "LineExtensionAmount", item["line_extension"], currency)
 
-        # Pricing Reference (price with IGV for gravado, same price for exonerado/inafecto)
         pricing = _el(line, CAC, "PricingReference")
         alt_price = _el(pricing, CAC, "AlternativeConditionPrice")
         _price(alt_price, CBC, "PriceAmount", item["price_with_igv"], currency)
         _el(alt_price, CBC, "PriceTypeCode", "01")
 
-        # Tax
         line_tax = _el(line, CAC, "TaxTotal")
         _amount(line_tax, CBC, "TaxAmount", item["igv"], currency)
         line_subtotal = _el(line_tax, CAC, "TaxSubtotal")
@@ -229,11 +209,9 @@ def build_invoice_xml(
         _el(line_scheme, CBC, "Name", scheme["name"])
         _el(line_scheme, CBC, "TaxTypeCode", scheme["code"])
 
-        # Item description
         inv_item = _el(line, CAC, "Item")
         _el(inv_item, CBC, "Description", item["description"])
 
-        # Price (without tax, up to 10 decimals)
         price = _el(line, CAC, "Price")
         _price(price, CBC, "PriceAmount", item["unit_price"], currency)
 

@@ -37,6 +37,8 @@ class ClientRead(BaseModel):
     serie_boleta: str | None
     serie_grr: str | None
     serie_grt: str | None
+    serie_nota_credito_factura: str | None
+    serie_nota_credito_boleta: str | None
     send_email: bool
     generate_pdf: bool
     is_active: bool
@@ -64,6 +66,8 @@ class ClientRead(BaseModel):
                 "serie_boleta": data.serie_boleta,
                 "serie_grr": data.serie_grr,
                 "serie_grt": data.serie_grt,
+                "serie_nota_credito_factura": data.serie_nota_credito_factura,
+                "serie_nota_credito_boleta": data.serie_nota_credito_boleta,
                 "send_email": data.send_email,
                 "generate_pdf": data.generate_pdf,
                 "is_active": data.is_active,
@@ -86,5 +90,7 @@ class ClientUpdate(BaseModel):
     serie_boleta: str | None = Field(None, max_length=4)
     serie_grr: str | None = Field(None, max_length=4)
     serie_grt: str | None = Field(None, max_length=4)
+    serie_nota_credito_factura: str | None = Field(None, max_length=4)
+    serie_nota_credito_boleta: str | None = Field(None, max_length=4)
     send_email: bool | None = None
     generate_pdf: bool | None = None
