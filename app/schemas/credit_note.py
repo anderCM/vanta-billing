@@ -27,7 +27,7 @@ class CreditNoteCreate(BaseModel):
     reference_document_id: str = Field(..., description="UUID of the original document to credit")
     reason_code: CreditNoteReasonCode
     description: str = Field(..., max_length=500)
-    series: str = Field(..., max_length=4)
+    series: str | None = Field(None, max_length=4)
     items: list[DocumentItemCreate] = Field(..., min_length=1)
 
 
