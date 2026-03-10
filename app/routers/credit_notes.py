@@ -22,6 +22,22 @@ async def create_credit_note(
     client: Client = Depends(get_current_client),
     db: Session = Depends(get_db),
 ):
+    # Resolve series from client config if not provided
+    if not data.series:
+        ref_doc = db.query(Document).filter(
+            Document.id == data.reference_document_id,
+            Document.client_id == client.id,
+        ).first()
+        if ref_doc and ref_doc.document_type == "01":
+            data.series = client.serie_nota_credito_factura
+        elif ref_doc and ref_doc.document_type == "03":
+            data.series = client.serie_nota_credito_boleta
+        if not data.series:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="No series provided and client has no default credit note series configured",
+            )
+
     try:
         return await create_and_send_credit_note(db, client, data=data)
     except MissingCredentialsError as e:

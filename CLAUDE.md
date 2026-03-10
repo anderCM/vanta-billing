@@ -85,7 +85,7 @@ This applies to invoices, receipts, and credit notes. The caller never needs to 
 
 Credit notes apply to both **facturas** and **boletas**. Each has its own series managed independently.
 
-1. Client sends credit note data to `POST /api/v1/credit-notes` with `reference_document_id` (UUID of the original invoice/receipt) and `series` (required — e.g. `FC01` for facturas, `BC01` for boletas)
+1. Client sends credit note data to `POST /api/v1/credit-notes` with `reference_document_id` (UUID of the original invoice/receipt). `series` is optional — if omitted, the microservice auto-resolves it from the client config based on the referenced document type (factura → `serie_nota_credito_factura`, boleta → `serie_nota_credito_boleta`).
 2. `cn_billing.py` validates the reference document exists, belongs to the client, and is type `"01"` (factura) or `"03"` (boleta)
 3. Customer info and currency are inherited from the referenced document
 4. Items are calculated with the same IGV-extraction logic as invoices
@@ -93,7 +93,7 @@ Credit notes apply to both **facturas** and **boletas**. Each has its own series
 6. Signed XML sent to SUNAT via SOAP (document type `"07"`); CDR response stored
 7. Failed credit notes can be retried via `POST /credit-notes/{id}/retry`
 
-**Series configuration:** Clients must configure `serie_nota_credito_factura` (e.g. `FC01`) and `serie_nota_credito_boleta` (e.g. `BC01`) via `PUT /api/v1/clients/me`. The caller sends the appropriate series in each request.
+**Series configuration:** Clients must configure `serie_nota_credito_factura` (e.g. `FC01`) and `serie_nota_credito_boleta` (e.g. `BC01`) via `PUT /api/v1/clients/me`. The series is auto-resolved from the client config based on the referenced document type. The caller can optionally override it by sending `series` explicitly.
 
 **Partial credit notes:** A credit note can include a subset of items from the original document. Multiple credit notes can reference the same invoice/boleta.
 
@@ -177,7 +177,6 @@ POST /api/v1/dispatch-guides/transportista
 POST /api/v1/credit-notes
 Authorization: Bearer <api_key>
 { "reference_document_id": "uuid-of-the-original-invoice",
-  "series": "FC01",
   "reason_code": "anulacion_de_la_operacion",
   "description": "Anulación por montos incorrectos",
   "items": [{ "description": "...", "quantity": 1,
@@ -187,13 +186,14 @@ Authorization: Bearer <api_key>
 POST /api/v1/credit-notes
 Authorization: Bearer <api_key>
 { "reference_document_id": "uuid-of-the-original-boleta",
-  "series": "BC01",
   "reason_code": "devolucion_total",
   "description": "Devolución total del producto",
   "items": [{ "description": "...", "quantity": 1,
   "item_type": "product", "unit_price": 100.00, "tax_type": "gravado" }] }
 
-# series is REQUIRED — use serie_nota_credito_factura (e.g. FC01) or serie_nota_credito_boleta (e.g. BC01).
+# series is OPTIONAL — auto-resolved from client config based on the referenced document type
+#   (factura → serie_nota_credito_factura e.g. FC01, boleta → serie_nota_credito_boleta e.g. BC01).
+#   Can be overridden by sending "series" explicitly.
 # Customer info and currency are inherited from the referenced document.
 # Credit notes can reference a subset of items — you don't need to include all items from the original document.
 # A single invoice/boleta can have multiple credit notes.
