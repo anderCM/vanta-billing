@@ -154,6 +154,8 @@ class DispatchGuideDetail(DispatchGuideRead):
     qr_text: str | None
     qr_image: str | None
     items: list[GRItemRead]
+    next_document_series: str | None = None
+    next_document_number: int | None = None
     updated_at: datetime
 
     model_config = {"from_attributes": True}

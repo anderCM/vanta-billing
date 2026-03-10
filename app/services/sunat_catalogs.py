@@ -91,3 +91,21 @@ GR_SERIES_PREFIXES = {
     "09": "T",
     "31": "V",
 }
+
+# --- Catálogo 09 - Credit note reason codes ---
+
+CREDIT_NOTE_REASON_CODES = {
+    "anulacion_de_la_operacion": "01",
+    "anulacion_por_error_en_el_ruc": "02",
+    "correccion_por_error_en_la_descripcion": "03",
+    "descuento_global": "04",
+    "descuento_por_item": "05",
+    "devolucion_total": "06",
+    "devolucion_por_item": "07",
+    "bonificacion": "08",
+    "disminucion_en_el_valor": "09",
+    "otros_conceptos": "10",
+    "ajustes_de_operaciones_de_exportacion": "11",
+    "ajustes_afectos_al_ivap": "12",
+    "correccion_del_monto_neto_pendiente_de_pago": "13",
+}

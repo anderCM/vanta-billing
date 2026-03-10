@@ -1,8 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ItemType(str, Enum):
@@ -29,6 +30,11 @@ class DocumentItemCreate(BaseModel):
     tax_type: TaxType
 
 
+class InstallmentCreate(BaseModel):
+    amount: Decimal = Field(..., gt=0)
+    due_date: date
+
+
 class InvoiceCreate(BaseModel):
     series: str | None = Field(None, max_length=4)
     customer_doc_type: CustomerDocType = Field(default=CustomerDocType.ruc)
@@ -37,6 +43,17 @@ class InvoiceCreate(BaseModel):
     customer_address: str | None = None
     currency: str = Field(default="PEN", max_length=3)
     items: list[DocumentItemCreate] = Field(..., min_length=1)
+    payment_condition: Literal["contado", "credito"] = "contado"
+    installments: list[InstallmentCreate] | None = None
+
+    @model_validator(mode="after")
+    def validate_payment_condition(self):
+        if self.payment_condition == "credito":
+            if not self.installments or len(self.installments) == 0:
+                raise ValueError("installments are required when payment_condition is 'credito'")
+        elif self.installments:
+            raise ValueError("installments must not be provided when payment_condition is 'contado'")
+        return self
 
 
 class ReceiptCreate(BaseModel):
@@ -47,6 +64,17 @@ class ReceiptCreate(BaseModel):
     customer_address: str | None = None
     currency: str = Field(default="PEN", max_length=3)
     items: list[DocumentItemCreate] = Field(..., min_length=1)
+    payment_condition: Literal["contado", "credito"] = "contado"
+    installments: list[InstallmentCreate] | None = None
+
+    @model_validator(mode="after")
+    def validate_payment_condition(self):
+        if self.payment_condition == "credito":
+            if not self.installments or len(self.installments) == 0:
+                raise ValueError("installments are required when payment_condition is 'credito'")
+        elif self.installments:
+            raise ValueError("installments must not be provided when payment_condition is 'contado'")
+        return self
 
 
 class DocumentItemRead(BaseModel):
@@ -58,6 +86,15 @@ class DocumentItemRead(BaseModel):
     igv_type: str
     igv: Decimal
     total: Decimal
+
+    model_config = {"from_attributes": True}
+
+
+class InstallmentRead(BaseModel):
+    id: int
+    installment_number: int
+    amount: Decimal
+    due_date: date
 
     model_config = {"from_attributes": True}
 
@@ -74,6 +111,7 @@ class DocumentRead(BaseModel):
     total_gravada: Decimal
     total_igv: Decimal
     total_amount: Decimal
+    payment_condition: str
     status: str
     issue_date: datetime
     created_at: datetime
@@ -91,6 +129,7 @@ class DocumentDetail(DocumentRead):
     qr_text: str | None = None
     qr_image: str | None = None
     items: list[DocumentItemRead]
+    installments: list[InstallmentRead]
     updated_at: datetime
     next_document_series: str | None = None
     next_document_number: int | None = None

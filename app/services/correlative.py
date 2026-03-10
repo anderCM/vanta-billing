@@ -45,6 +45,23 @@ def rollback_on_pre_sunat_error(db: Session) -> None:
     db.rollback()
 
 
+def attach_next_correlative(db: Session, record, client_id: str, document_type: str, series: str) -> None:
+    """Attach next correlative info to a record for the caller to track."""
+    from app.models.document_series import DocumentSeries
+
+    ds = (
+        db.query(DocumentSeries)
+        .filter(
+            DocumentSeries.client_id == client_id,
+            DocumentSeries.document_type == document_type,
+            DocumentSeries.series == series,
+        )
+        .first()
+    )
+    record.next_document_series = series
+    record.next_document_number = (ds.current_correlative + 1) if ds else 1
+
+
 def set_error_status(db: Session, record) -> None:
     """Mark a document or dispatch guide as ERROR and commit.
 
