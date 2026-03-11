@@ -177,11 +177,30 @@ async def create_and_send_document(
     installments_data = None
     if data.payment_condition == "credito" and data.installments:
         installments_sum = sum(inst.amount for inst in data.installments)
-        if installments_sum != total_amount:
-            rollback_on_pre_sunat_error(db)
-            raise BillingError(
-                f"Sum of installments ({installments_sum}) must equal total_amount ({total_amount})"
-            )
+        has_base_prices = any(item.unit_price_without_tax is not None for item in data.items)
+        if has_base_prices:
+            # Strict: caller and microservice use the same base → totals must match exactly
+            if installments_sum != total_amount:
+                rollback_on_pre_sunat_error(db)
+                raise BillingError(
+                    f"Sum of installments ({installments_sum}) must equal total_amount ({total_amount})"
+                )
+        else:
+            # Fallback path: unit_price / 1.18 rounding can cause small diffs
+            diff = abs(installments_sum - total_amount)
+            max_tolerance = max(total_amount * Decimal("0.01"), Decimal("1.00"))
+            if diff > max_tolerance:
+                rollback_on_pre_sunat_error(db)
+                raise BillingError(
+                    f"Sum of installments ({installments_sum}) differs from total_amount ({total_amount}) "
+                    f"by {diff}. Send unit_price_without_tax per item to avoid rounding issues."
+                )
+            if diff != Decimal("0"):
+                data.installments[-1].amount += total_amount - installments_sum
+                logger.info(
+                    "Auto-adjusted last installment by %s to match total_amount %s (fallback rounding)",
+                    total_amount - installments_sum, total_amount,
+                )
         installments_data = []
         for idx, inst in enumerate(data.installments, 1):
             db.add(DocumentInstallment(

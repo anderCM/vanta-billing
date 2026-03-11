@@ -66,20 +66,20 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 Items support two pricing fields:
 
 - **`unit_price`** (required): Price **WITH IGV** (precio de venta al público). Always sent.
-- **`unit_price_without_tax`** (optional, nullable): Explicit base price **WITHOUT IGV**. When provided, the microservice uses it directly — no division, no rounding amplification.
+- **`unit_price_without_tax`** (optional, nullable): Explicit base price **WITHOUT IGV**, sent with **full precision** (no truncation). When provided, the microservice uses it directly — no division, no rounding amplification.
 
 **When `unit_price_without_tax` IS provided (recommended):**
-The microservice uses it as the base price directly. Both caller and microservice compute identical totals because the same input produces the same deterministic calculation: `line_ext = round(qty × base, 2)`, `igv = round(line_ext × 0.18, 2)`.
+The caller sends the raw result of `unit_price / 1.18` without truncation (e.g., `3.10 / 1.18 = 2.6271186440677966...`). The microservice uses this full-precision value directly. Both sides compute identical totals: `line_ext = round(qty × base, 2)`, `igv = round(line_ext × 0.18, 2)`.
 
-Example: `unit_price: 11.80, unit_price_without_tax: 10.00, tax_type: "gravado"` → `base: 10.00`, `igv: 1.80 × qty`, `total: 11.80 × qty`.
+Example: `unit_price: 3.10, unit_price_without_tax: 2.6271186440677966, tax_type: "gravado"` → `line_ext = round(100 × 2.6271186... , 2) = 262.71`, `igv = 47.29`, `total = 310.00`.
 
 **When `unit_price_without_tax` is NOT provided (backward compatible):**
-Falls back to extracting the base price via `unit_price / 1.18`. This can cause rounding discrepancies with high quantities (e.g., `3.10 / 1.18 = 2.627... → 2.63`, amplified by qty). Existing clients that only send `unit_price` continue working as before.
+Falls back to extracting the base price via `unit_price / 1.18`, rounded to 2 decimals. This can cause rounding discrepancies with high quantities (e.g., `3.10 / 1.18 → 2.63`, then `100 × 2.63 = 263.00` vs the correct `262.71`). For installments, a tolerance of 1% is applied and the last installment is auto-adjusted.
 
-- **Gravado items:** `base_price = unit_price_without_tax ?? (unit_price / 1.18)`
+- **Gravado items:** `base_price = unit_price_without_tax ?? round(unit_price / 1.18, 2)`
 - **Exonerado/Inafecto items:** `base_price = unit_price_without_tax ?? unit_price` — no IGV component.
 
-This applies to invoices, receipts, and credit notes. The `unit_price_without_tax` field is stored in the `document_items` table (nullable) for audit purposes.
+**DB storage:** `unit_price_without_tax` is stored as `Numeric(20, 10)` in `document_items` to preserve full precision. The field is nullable for backward compatibility.
 
 ### Invoice/Receipt Flow
 
