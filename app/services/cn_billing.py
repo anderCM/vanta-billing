@@ -40,6 +40,7 @@ def _translate_items(data: CreditNoteCreate) -> list[dict]:
             "quantity": item.quantity,
             "unit_code": ITEM_TYPE_TO_UNIT_CODE[item.item_type.value],
             "unit_price": item.unit_price,
+            "unit_price_without_tax": item.unit_price_without_tax,
             "igv_type": TAX_TYPE_TO_IGV_CODE[item.tax_type.value],
         }
         for item in data.items
@@ -47,7 +48,12 @@ def _translate_items(data: CreditNoteCreate) -> list[dict]:
 
 
 def _calculate_items(items_data: list[dict]) -> tuple[list[dict], Decimal, Decimal, Decimal]:
-    """Calculate SUNAT line amounts. unit_price WITH IGV for gravado items."""
+    """Calculate SUNAT line amounts.
+
+    If unit_price_without_tax is provided, it is used directly as the base price
+    (no division, no rounding amplification). Otherwise, falls back to extracting
+    the base price from the IGV-inclusive unit_price via unit_price / 1.18.
+    """
     calculated = []
     total_gravada = Decimal("0")
     total_exonerada = Decimal("0")
@@ -57,24 +63,32 @@ def _calculate_items(items_data: list[dict]) -> tuple[list[dict], Decimal, Decim
     for item in items_data:
         qty = Decimal(str(item["quantity"]))
         unit_price = Decimal(str(item["unit_price"]))
+        unit_price_without_tax = (
+            Decimal(str(item["unit_price_without_tax"]))
+            if item.get("unit_price_without_tax") is not None
+            else None
+        )
         igv_type = item["igv_type"]
 
         if igv_type.startswith(IGVGroup.GRAVADO):
             price_with_igv = unit_price
-            base_price = (unit_price / (1 + IGV_RATE)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if unit_price_without_tax is not None:
+                base_price = unit_price_without_tax
+            else:
+                base_price = (unit_price / (1 + IGV_RATE)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             line_extension = (qty * base_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             igv = (line_extension * IGV_RATE).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             total_gravada += line_extension
         elif igv_type.startswith(IGVGroup.EXONERADO):
-            base_price = unit_price
+            base_price = unit_price_without_tax if unit_price_without_tax is not None else unit_price
             price_with_igv = unit_price
-            line_extension = (qty * unit_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            line_extension = (qty * base_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             igv = Decimal("0.00")
             total_exonerada += line_extension
         else:
-            base_price = unit_price
+            base_price = unit_price_without_tax if unit_price_without_tax is not None else unit_price
             price_with_igv = unit_price
-            line_extension = (qty * unit_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            line_extension = (qty * base_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             igv = Decimal("0.00")
             total_inafecta += line_extension
 
@@ -86,6 +100,7 @@ def _calculate_items(items_data: list[dict]) -> tuple[list[dict], Decimal, Decim
             "quantity": qty,
             "unit_code": item["unit_code"],
             "unit_price": base_price,
+            "unit_price_without_tax": unit_price_without_tax,
             "igv_type": igv_type,
             "line_extension": line_extension,
             "igv": igv,
@@ -165,6 +180,7 @@ async def create_and_send_credit_note(
             quantity=item["quantity"],
             unit_code=item["unit_code"],
             unit_price=item["unit_price"],
+            unit_price_without_tax=item["unit_price_without_tax"],
             igv_type=item["igv_type"],
             igv=item["igv"],
             total=item["total"],
