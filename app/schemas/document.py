@@ -27,6 +27,7 @@ class DocumentItemCreate(BaseModel):
     quantity: Decimal = Field(..., gt=0)
     item_type: ItemType
     unit_price: Decimal = Field(..., gt=0)
+    unit_price_without_tax: Decimal | None = Field(None, gt=0)
     tax_type: TaxType
 
 
@@ -83,6 +84,7 @@ class DocumentItemRead(BaseModel):
     quantity: Decimal
     unit_code: str
     unit_price: Decimal
+    unit_price_without_tax: Decimal | None = None
     igv_type: str
     igv: Decimal
     total: Decimal

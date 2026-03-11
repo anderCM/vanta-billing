@@ -61,16 +61,25 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - **`app/models/`** — SQLAlchemy models: `Client`, `Document`, `DocumentItem`, `DocumentInstallment`, `DocumentSeries`, `DispatchGuide`, `DispatchGuideItem`.
 - **`app/schemas/`** — Pydantic schemas for request/response validation.
 
-### Pricing: unit_price comes WITH IGV (IMPORTANT)
+### Pricing: unit_price + unit_price_without_tax (IMPORTANT)
 
-All `unit_price` values sent by the caller are **IGV-inclusive** (precio de venta al público). The microservice internally extracts the base price for SUNAT's XML:
+Items support two pricing fields:
 
-- **Gravado items:** `base_price = unit_price / 1.18` — the microservice extracts the base, calculates IGV, and uses both in the XML.
-- **Exonerado/Inafecto items:** `base_price = unit_price` — no IGV component, price is used as-is.
+- **`unit_price`** (required): Price **WITH IGV** (precio de venta al público). Always sent.
+- **`unit_price_without_tax`** (optional, nullable): Explicit base price **WITHOUT IGV**. When provided, the microservice uses it directly — no division, no rounding amplification.
 
-Example: caller sends `unit_price: 118.00` with `tax_type: "gravado"` → microservice calculates `base: 100.00`, `igv: 18.00`, `total: 118.00`.
+**When `unit_price_without_tax` IS provided (recommended):**
+The microservice uses it as the base price directly. Both caller and microservice compute identical totals because the same input produces the same deterministic calculation: `line_ext = round(qty × base, 2)`, `igv = round(line_ext × 0.18, 2)`.
 
-This applies to invoices, receipts, and credit notes. The caller never needs to calculate IGV — just send the final sale price.
+Example: `unit_price: 11.80, unit_price_without_tax: 10.00, tax_type: "gravado"` → `base: 10.00`, `igv: 1.80 × qty`, `total: 11.80 × qty`.
+
+**When `unit_price_without_tax` is NOT provided (backward compatible):**
+Falls back to extracting the base price via `unit_price / 1.18`. This can cause rounding discrepancies with high quantities (e.g., `3.10 / 1.18 = 2.627... → 2.63`, amplified by qty). Existing clients that only send `unit_price` continue working as before.
+
+- **Gravado items:** `base_price = unit_price_without_tax ?? (unit_price / 1.18)`
+- **Exonerado/Inafecto items:** `base_price = unit_price_without_tax ?? unit_price` — no IGV component.
+
+This applies to invoices, receipts, and credit notes. The `unit_price_without_tax` field is stored in the `document_items` table (nullable) for audit purposes.
 
 ### Invoice/Receipt Flow
 
@@ -131,12 +140,20 @@ This microservice exposes a REST API under `http://<host>:8000/api/v1`. All busi
 All `POST` endpoints are async — they create, sign, and send to SUNAT in a single call, returning the full result including CDR response.
 
 ```
-# Invoices (Facturas) — Contado (default, backward compatible)
+# Invoices (Facturas) — Contado, with unit_price_without_tax (recommended)
 POST /api/v1/invoices
 Authorization: Bearer <api_key>
 { "customer_doc_type": "ruc", "customer_doc_number": "20123456789",
   "customer_name": "...", "items": [{ "description": "...", "quantity": 1,
-  "item_type": "product", "unit_price": 100.00, "tax_type": "gravado" }] }
+  "item_type": "product", "unit_price": 118.00,
+  "unit_price_without_tax": 100.00, "tax_type": "gravado" }] }
+
+# Invoices (Facturas) — Contado, backward compatible (no unit_price_without_tax)
+POST /api/v1/invoices
+Authorization: Bearer <api_key>
+{ "customer_doc_type": "ruc", "customer_doc_number": "20123456789",
+  "customer_name": "...", "items": [{ "description": "...", "quantity": 1,
+  "item_type": "product", "unit_price": 118.00, "tax_type": "gravado" }] }
 
 # Invoices (Facturas) — Crédito con cuotas
 POST /api/v1/invoices
@@ -149,7 +166,8 @@ Authorization: Bearer <api_key>
     { "amount": 59.00, "due_date": "2026-05-09" }
   ],
   "items": [{ "description": "...", "quantity": 1,
-  "item_type": "product", "unit_price": 100.00, "tax_type": "gravado" }] }
+  "item_type": "product", "unit_price": 118.00,
+  "unit_price_without_tax": 100.00, "tax_type": "gravado" }] }
 
 # Receipts (Boletas)
 POST /api/v1/receipts  (same structure, customer_doc_type defaults to "dni")
@@ -180,7 +198,8 @@ Authorization: Bearer <api_key>
   "reason_code": "anulacion_de_la_operacion",
   "description": "Anulación por montos incorrectos",
   "items": [{ "description": "...", "quantity": 1,
-  "item_type": "product", "unit_price": 5900.00, "tax_type": "gravado" }] }
+  "item_type": "product", "unit_price": 5900.00,
+  "unit_price_without_tax": 5000.00, "tax_type": "gravado" }] }
 
 # Credit Notes (Notas de Crédito) — para Boletas
 POST /api/v1/credit-notes
@@ -189,7 +208,8 @@ Authorization: Bearer <api_key>
   "reason_code": "devolucion_total",
   "description": "Devolución total del producto",
   "items": [{ "description": "...", "quantity": 1,
-  "item_type": "product", "unit_price": 100.00, "tax_type": "gravado" }] }
+  "item_type": "product", "unit_price": 118.00,
+  "unit_price_without_tax": 100.00, "tax_type": "gravado" }] }
 
 # series is OPTIONAL — auto-resolved from client config based on the referenced document type
 #   (factura → serie_nota_credito_factura e.g. FC01, boleta → serie_nota_credito_boleta e.g. BC01).
