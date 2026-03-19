@@ -305,6 +305,7 @@ async def create_and_send_document(
         )
     except BillingError as e:
         logger.error("SUNAT send failed for document %s: %s", document.id, e)
+        document.cdr_description = str(e)
         set_error_status(db, document)
 
     db.refresh(document)
@@ -346,6 +347,7 @@ async def retry_send_document(db: Session, client: Client, document: Document) -
         logger.info("Retry successful for document %s: status=%s", document.id, document.status)
     except BillingError as e:
         logger.error("SUNAT send failed for document %s: %s", document.id, e)
+        document.cdr_description = str(e)
         set_error_status(db, document)
         raise
 

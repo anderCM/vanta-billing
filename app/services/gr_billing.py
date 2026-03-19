@@ -260,6 +260,7 @@ async def create_and_send_dispatch_guide(
         )
     except BillingError as e:
         logger.error("SUNAT send failed for dispatch guide %s: %s", guide.id, e)
+        guide.cdr_description = str(e)
         set_error_status(db, guide)
 
     db.refresh(guide)
@@ -302,6 +303,7 @@ async def retry_send_dispatch_guide(
         guide.status = cdr.get("status", DocumentStatus.SENT)
     except BillingError as e:
         logger.error("SUNAT send failed for dispatch guide %s: %s", guide.id, e)
+        guide.cdr_description = str(e)
         set_error_status(db, guide)
         raise
 

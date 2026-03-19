@@ -283,6 +283,7 @@ async def create_and_send_credit_note(
         )
     except BillingError as e:
         logger.error("SUNAT send failed for credit note %s: %s", document.id, e)
+        document.cdr_description = str(e)
         set_error_status(db, document)
 
     db.refresh(document)
@@ -324,6 +325,7 @@ async def retry_send_credit_note(db: Session, client: Client, document: Document
         logger.info("Retry successful for credit note %s: status=%s", document.id, document.status)
     except BillingError as e:
         logger.error("SUNAT send failed for credit note %s: %s", document.id, e)
+        document.cdr_description = str(e)
         set_error_status(db, document)
         raise
 
