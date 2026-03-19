@@ -1,6 +1,8 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -22,7 +24,7 @@ from app.services.gr_billing import (
     create_and_send_dispatch_guide,
     retry_send_dispatch_guide,
 )
-from app.services.sunat_catalogs import GR_SERIES_PREFIXES
+from app.services.sunat_catalogs import DocumentStatus, GR_SERIES_PREFIXES
 
 router = APIRouter(tags=["dispatch-guides"])
 
@@ -151,13 +153,16 @@ async def _create_dispatch_guide(db, client, document_type, data):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
         )
-    except SUNATError as e:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
     except BillingError as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
         )
 
+    if guide.status == DocumentStatus.ERROR:
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content=jsonable_encoder(DispatchGuideDetail.model_validate(guide)),
+        )
     return guide
 
 

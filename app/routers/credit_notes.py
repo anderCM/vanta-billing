@@ -1,4 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -12,6 +14,7 @@ from app.services.cn_billing import (
     create_and_send_credit_note,
     retry_send_credit_note,
 )
+from app.services.sunat_catalogs import DocumentStatus
 
 router = APIRouter(tags=["credit-notes"])
 
@@ -39,13 +42,18 @@ async def create_credit_note(
             )
 
     try:
-        return await create_and_send_credit_note(db, client, data=data)
+        document = await create_and_send_credit_note(db, client, data=data)
     except MissingCredentialsError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except SUNATError as e:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
     except BillingError as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+    if document.status == DocumentStatus.ERROR:
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content=jsonable_encoder(CreditNoteDetail.model_validate(document)),
+        )
+    return document
 
 
 @router.get("/credit-notes", response_model=list[CreditNoteRead])

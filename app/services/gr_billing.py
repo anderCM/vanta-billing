@@ -261,9 +261,7 @@ async def create_and_send_dispatch_guide(
     except BillingError as e:
         logger.error("SUNAT send failed for dispatch guide %s: %s", guide.id, e)
         set_error_status(db, guide)
-        raise
 
-    db.commit()
     db.refresh(guide)
     attach_next_correlative(db, guide, client.id, document_type, data.series)
     return guide

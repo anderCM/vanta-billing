@@ -322,26 +322,61 @@ El microservicio protege los correlativos para evitar saltos en la numeración S
 
 **Fallo en envío SUNAT (error de red, rechazo):** El documento se persiste con status `ERROR` o `REJECTED`, con su XML firmado. El correlativo **sí** se consume porque el documento ya fue construido y potencialmente enviado.
 
+**Respuesta HTTP 502 (SUNAT error):** Cuando SUNAT falla durante la creación de un documento, el microservicio devuelve HTTP 502 con el **mismo body** que una respuesta exitosa (mismo schema `DocumentDetail`/`CreditNoteDetail`/`DispatchGuideDetail`), pero con `status: "ERROR"`. El body incluye `id`, `series`, `correlative`, y todos los campos normales.
+
+```json
+{
+  "id": "uuid-del-documento",
+  "document_type": "01",
+  "series": "F001",
+  "correlative": 123,
+  "status": "ERROR",
+  "total_amount": "118.00",
+  ...
+}
+```
+
+Esto permite al caller parsear la respuesta de la misma forma que un 201 — solo varía el HTTP status code y el campo `status`.
+
 **Flujo correcto para el caller (Rails):**
 
 ```
-1. POST /api/v1/invoices → respuesta exitosa (status: ACCEPTED)
-   ✅ Todo OK. Guardar el document.id y los datos.
+1. POST /api/v1/invoices → HTTP 201 (status: ACCEPTED)
+   ✅ Todo OK. Guardar body["id"] y los datos.
 
 2. POST /api/v1/invoices → HTTP 500 (XML build/sign error)
    ⚠️ No se consumió correlativo. No se creó documento.
    → Corregir los datos y volver a llamar POST /invoices.
 
-3. POST /api/v1/invoices → HTTP 502 (SUNAT error) o status: ERROR/REJECTED
-   ⚠️ Se consumió correlativo. El documento existe con id.
-   → GUARDAR el document.id devuelto en la respuesta.
+3. POST /api/v1/invoices → HTTP 502 (SUNAT error)
+   ⚠️ Se consumió correlativo. El documento existe con status ERROR.
+   → El body tiene la MISMA estructura que un 201 — leer body["id"] y GUARDARLO.
    → Para reintentar: POST /documents/{id}/retry (NO crear nuevo documento).
    → El retry reenvía el MISMO XML con el MISMO correlativo.
 ```
 
-**Regla clave:** Cuando el HTTP status es 502 o el documento viene con status `ERROR`/`REJECTED`, el caller **DEBE** guardar el `id` del documento y usar el endpoint `/retry` en vez de crear un documento nuevo. Crear un documento nuevo en este caso quemaría un correlativo adicional.
+**Ejemplo de manejo en Rails:**
 
-Los mismos endpoints de retry existen para guías de remisión (`POST /dispatch-guides/{id}/retry`) y notas de crédito (`POST /credit-notes/{id}/retry`).
+```ruby
+response = billing_client.create_invoice(payload)
+
+case response.status
+when 201, 502
+  # Ambos devuelven el mismo schema — guardar siempre
+  save_document(response.body)
+  # Si status es ERROR, programar retry:
+  if response.body["status"] == "ERROR"
+    schedule_retry(document_id: response.body["id"])
+  end
+when 500
+  # Error pre-SUNAT — no se creó documento, se puede reintentar creando uno nuevo
+  log_error(response.body["detail"])
+end
+```
+
+**Regla clave:** Cuando el HTTP status es 502, el body es idéntico al de un 201 (mismo schema, con `id` en el top level). El caller **DEBE** guardar el `id` y usar el endpoint `/retry` en vez de crear un documento nuevo. Crear un documento nuevo quemaría un correlativo adicional.
+
+Los mismos endpoints de retry existen para guías de remisión (`POST /dispatch-guides/{id}/retry`) y notas de crédito (`POST /credit-notes/{id}/retry`). Todos devuelven el mismo schema en 502.
 
 ### Response Status Values
 
