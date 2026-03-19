@@ -307,6 +307,8 @@ async def create_and_send_document(
         logger.error("SUNAT send failed for document %s: %s", document.id, e)
         document.cdr_description = str(e)
         set_error_status(db, document)
+    else:
+        db.commit()
 
     db.refresh(document)
     attach_next_correlative(db, document, client.id, document_type, data.series)

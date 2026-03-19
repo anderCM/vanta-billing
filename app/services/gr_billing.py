@@ -262,6 +262,8 @@ async def create_and_send_dispatch_guide(
         logger.error("SUNAT send failed for dispatch guide %s: %s", guide.id, e)
         guide.cdr_description = str(e)
         set_error_status(db, guide)
+    else:
+        db.commit()
 
     db.refresh(guide)
     attach_next_correlative(db, guide, client.id, document_type, data.series)
