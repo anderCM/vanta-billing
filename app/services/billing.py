@@ -306,9 +306,7 @@ async def create_and_send_document(
     except BillingError as e:
         logger.error("SUNAT send failed for document %s: %s", document.id, e)
         set_error_status(db, document)
-        raise
 
-    db.commit()
     db.refresh(document)
     attach_next_correlative(db, document, client.id, document_type, data.series)
     return document

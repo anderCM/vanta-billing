@@ -284,9 +284,7 @@ async def create_and_send_credit_note(
     except BillingError as e:
         logger.error("SUNAT send failed for credit note %s: %s", document.id, e)
         set_error_status(db, document)
-        raise
 
-    db.commit()
     db.refresh(document)
     attach_next_correlative(db, document, client.id, DOCUMENT_TYPE_CREDIT_NOTE, series)
     return document
