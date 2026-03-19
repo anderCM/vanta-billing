@@ -303,11 +303,10 @@ async def create_and_send_document(
             "Document %s sent to SUNAT: status=%s code=%s",
             document.id, document.status, document.cdr_code,
         )
-    except BillingError:
+    except BillingError as e:
+        logger.error("SUNAT send failed for document %s: %s", document.id, e)
         set_error_status(db, document)
-        raise
 
-    db.commit()
     db.refresh(document)
     attach_next_correlative(db, document, client.id, document_type, data.series)
     return document
@@ -345,7 +344,8 @@ async def retry_send_document(db: Session, client: Client, document: Document) -
         document.status = cdr.get("status", DocumentStatus.SENT)
 
         logger.info("Retry successful for document %s: status=%s", document.id, document.status)
-    except BillingError:
+    except BillingError as e:
+        logger.error("SUNAT send failed for document %s: %s", document.id, e)
         set_error_status(db, document)
         raise
 

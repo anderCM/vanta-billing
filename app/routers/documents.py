@@ -1,6 +1,8 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -15,6 +17,7 @@ from app.schemas.document import (
 )
 from app.services.billing import check_document_status, create_and_send_document, retry_send_document
 from app.services.document_service import get_document_by_id, list_documents
+from app.services.sunat_catalogs import DocumentStatus
 
 router = APIRouter(tags=["documents"])
 
@@ -120,13 +123,18 @@ async def _create_document(
             )
 
     try:
-        return await create_and_send_document(db, client, document_type=document_type, data=data)
+        document = await create_and_send_document(db, client, document_type=document_type, data=data)
     except MissingCredentialsError as e:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
-    except SUNATError as e:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
     except BillingError as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+    if document.status == DocumentStatus.ERROR:
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content=jsonable_encoder(DocumentDetail.model_validate(document)),
+        )
+    return document
 
 
 def _get_or_404(db: Session, client: Client, document_id: str):
